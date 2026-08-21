@@ -2039,4 +2039,6 @@ if aba_manual:
                 "status_receita": "", "origem": "Cadastro manual", "observacoes": observacoes.strip(),
             }
             inseridos, _ = salvar_leads([enriquecer_lead_icp(lead)])
+            if inseridos:
+                st.cache_data.clear()
             st.success("Lead cadastrado." if inseridos else "Esse lead já existe na base.")
