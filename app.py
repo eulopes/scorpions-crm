@@ -944,7 +944,7 @@ st.markdown(
 
       .sales-summary {
         display: grid;
-        grid-template-columns: repeat(4, minmax(150px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
         gap: 0.9rem;
         margin: 0 0 1.2rem 0;
       }
@@ -1158,6 +1158,9 @@ st.markdown(
         background: linear-gradient(90deg, rgba(0, 110, 253, 0.22), rgba(112, 211, 252, 0.05));
         border-left: 2px solid var(--primary);
       }
+      [data-testid="stSidebar"] [role="radiogroup"] label > div:first-child {
+        display: none;
+      }
 
       .stTabs [data-baseweb="tab-list"] {
         gap: 0.4rem;
@@ -1254,6 +1257,10 @@ if aba_dashboard:
         """
         <div class="sales-summary">
           <div class="sales-summary__item">
+            <span class="label">Leads na base</span>
+            <strong>{}</strong>
+          </div>
+          <div class="sales-summary__item">
             <span class="label">Novo pipeline</span>
             <strong>{}</strong>
           </div>
@@ -1265,20 +1272,22 @@ if aba_dashboard:
             <span class="label">Propostas</span>
             <strong>{}</strong>
           </div>
+          <div class="sales-summary__item">
+            <span class="label">Fechados</span>
+            <strong>{}</strong>
+          </div>
+          <div class="sales-summary__item">
+            <span class="label">Conversão</span>
+            <strong>{:.1f}%</strong>
+          </div>
           <div class="sales-summary__item accent">
             <span class="label">Valor bruto</span>
             <strong>R$ {:,.2f}</strong>
           </div>
         </div>
-        """.format(novos, em_andamento, propostas, valor_total),
+        """.format(total, novos, em_andamento, propostas, fechados, conversao, valor_total),
         unsafe_allow_html=True,
     )
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Leads na base", total)
-    c2.metric("Em andamento", em_andamento)
-    c3.metric("Fechados", fechados)
-    c4.metric("Conversão", f"{conversao:.1f}%")
 
     if total:
         st.divider()
