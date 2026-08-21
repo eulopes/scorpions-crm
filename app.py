@@ -757,13 +757,18 @@ def excluir_lead(lead_id: int) -> None:
         nome_empresa = conexao.execute(
             "SELECT nome_empresa FROM leads WHERE id = ?", (lead_id,)
         ).fetchone()
-        conexao.execute("DELETE FROM leads WHERE id = ?", (lead_id,))
 
+    # Registra a atividade ANTES de apagar o lead: a tabela de atividades tem
+    # FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE SET NULL, entao inserir
+    # depois de deletar violaria a constraint (o lead_id ja nao existiria mais).
     registrar_atividade(
         "lead_excluido",
         f"Lead '{nome_empresa['nome_empresa'] if nome_empresa else lead_id}' excluído da base.",
         lead_id,
     )
+
+    with conectar() as conexao:
+        conexao.execute("DELETE FROM leads WHERE id = ?", (lead_id,))
 
     st.cache_data.clear()
 
