@@ -44,7 +44,7 @@ from niche_sources import (
 
 
 APP_DIR = Path(__file__).resolve().parent
-DB_PATH = APP_DIR / "scorpions_base.db"
+DB_PATH = Path(os.getenv("CRM_DB_PATH", str(APP_DIR / "scorpions_base.db")))
 GOOGLE_PLACES_URL = "https://places.googleapis.com/v1/places:searchText"
 IBGE_MUNICIPIOS_URL = (
     "https://servicodados.ibge.gov.br/api/v1/localidades/estados/{uf}/municipios"

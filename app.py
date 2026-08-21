@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import ipaddress
+import json
 import re
 import sqlite3
 import time
@@ -72,7 +73,7 @@ from automation import (
 
 
 APP_DIR = Path(__file__).resolve().parent
-DB_PATH = APP_DIR / "scorpions_base.db"
+DB_PATH = Path(os.getenv("CRM_DB_PATH", str(APP_DIR / "scorpions_base.db")))
 GOOGLE_PLACES_URL = "https://places.googleapis.com/v1/places:searchText"
 BRASIL_API_CNPJ_URL = "https://brasilapi.com.br/api/cnpj/v1/{cnpj}"
 PADRAO_CNPJ = re.compile(r"(?<!\d)\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}(?!\d)")
@@ -127,6 +128,17 @@ def _hash_fantasma() -> str:
 
 
 def _usuarios_autenticacao() -> dict[str, str]:
+    """Le os usuarios/hashes de duas formas possiveis, para funcionar tanto no
+    Streamlit Community Cloud (secrets.toml) quanto em hosts que usam variavel
+    de ambiente pura (Railway, Render, VPS): AUTH_USERS_JSON='{"admin": "hash"}'."""
+    variavel_ambiente = os.getenv("AUTH_USERS_JSON", "").strip()
+    if variavel_ambiente:
+        try:
+            usuarios = json.loads(variavel_ambiente)
+            if isinstance(usuarios, dict):
+                return {str(k): str(v) for k, v in usuarios.items()}
+        except json.JSONDecodeError:
+            pass
     try:
         return dict(st.secrets.get("AUTH_USERS", {}))
     except (FileNotFoundError, AttributeError):
