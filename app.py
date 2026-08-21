@@ -101,11 +101,21 @@ BLOQUEIO_LOGIN_SEGUNDOS = 60
 
 @st.cache_resource
 def _estado_login() -> dict[str, Any]:
-    """Estado de bloqueio de login: uma unica instancia por processo (nao por
-    sessao/aba - via st.cache_resource), para que abrir uma aba nova nao
-    reinicie a contagem de tentativas de um atacante. Top-level comum resetaria
-    a cada rerun do Streamlit; cache_resource evita isso."""
-    return {"tentativas": 0, "bloqueado_ate": 0.0, "lock": threading.Lock()}
+    """Estado de bloqueio de login por IP: uma unica instancia por processo
+    (via st.cache_resource, nao por sessao/aba), guardando tentativas por
+    endereco IP. Isso evita duas falhas: (1) abrir uma aba nova reiniciar a
+    contagem de um atacante, e (2) um estranho travar TODO MUNDO (inclusive o
+    admin de verdade) so de errar a senha propositalmente 5 vezes de qualquer
+    lugar - com o bloqueio por IP, ele so tranca a propria conexao dele.
+
+    st.context.ip_address pode ser falsificado (nao e 100% confiavel como unica
+    defesa), mas ja resolve o cenario mais comum de abuso."""
+    return {"por_ip": {}, "lock": threading.Lock()}
+
+
+def _chave_ip() -> str:
+    ip = st.context.ip_address
+    return ip if ip else "local"
 
 
 @st.cache_resource
@@ -169,6 +179,8 @@ def exigir_login() -> None:
     agora = time.time()
     usuarios = _usuarios_autenticacao()
     estado = _estado_login()
+    chave_ip = _chave_ip()
+    bloqueio_ip = estado["por_ip"].get(chave_ip, {"tentativas": 0, "bloqueado_ate": 0.0})
 
     with st.container(key="login_card"):
         st.markdown('<div class="login-eyebrow">Acesso restrito</div>', unsafe_allow_html=True)
@@ -180,9 +192,9 @@ def exigir_login() -> None:
                 "Nenhum usuário configurado ainda. Adicione a seção `[AUTH_USERS]` em "
                 "`.streamlit/secrets.toml` com `usuario = \"hash_bcrypt\"` para liberar o acesso."
             )
-        elif agora < estado["bloqueado_ate"]:
-            restante = int(estado["bloqueado_ate"] - agora)
-            st.error(f"Muitas tentativas incorretas. Tente novamente em {restante}s.")
+        elif agora < bloqueio_ip["bloqueado_ate"]:
+            restante = int(bloqueio_ip["bloqueado_ate"] - agora)
+            st.error(f"Muitas tentativas incorretas a partir desta conexão. Tente novamente em {restante}s.")
         else:
             with st.form("form_login", border=False):
                 usuario = st.text_input("Usuário")
@@ -199,15 +211,15 @@ def exigir_login() -> None:
                     st.session_state.autenticado = True
                     st.session_state.usuario_logado = usuario
                     with estado["lock"]:
-                        estado["tentativas"] = 0
-                        estado["bloqueado_ate"] = 0.0
+                        estado["por_ip"].pop(chave_ip, None)
                     st.rerun()
                 else:
                     with estado["lock"]:
-                        estado["tentativas"] += 1
-                        if estado["tentativas"] >= MAX_TENTATIVAS_LOGIN:
-                            estado["bloqueado_ate"] = agora + BLOQUEIO_LOGIN_SEGUNDOS
-                            estado["tentativas"] = 0
+                        bloqueio_ip["tentativas"] += 1
+                        if bloqueio_ip["tentativas"] >= MAX_TENTATIVAS_LOGIN:
+                            bloqueio_ip["bloqueado_ate"] = agora + BLOQUEIO_LOGIN_SEGUNDOS
+                            bloqueio_ip["tentativas"] = 0
+                        estado["por_ip"][chave_ip] = bloqueio_ip
                     st.error("Usuário ou senha inválidos.")
 
     st.stop()
