@@ -792,13 +792,15 @@ def atualizar_etapa_funil(lead_id: int, nova_etapa: str):
 
 def _render_kanban_card(lead: pd.Series, etapa_atual: str) -> None:
     """Renderiza um card de lead no quadro Kanban."""
-    contatos_disponiveis = " ".join(
-        [
-            "📞" if lead.get("telefone") else "",
-            "📧" if lead.get("email") else "",
-            "🌐" if lead.get("site") else "",
-        ]
-    ).strip()
+    contatos_disponiveis = " · ".join(
+        rotulo
+        for rotulo, disponivel in (
+            ("Tel", lead.get("telefone")),
+            ("E-mail", lead.get("email")),
+            ("Site", lead.get("site")),
+        )
+        if disponivel
+    )
     alerta_contato = ""
     proximo_contato_str = lead.get("proximo_contato")
     if proximo_contato_str:
@@ -823,10 +825,10 @@ def _render_kanban_card(lead: pd.Series, etapa_atual: str) -> None:
                 <div class="kanban-company">{lead['nome_empresa']}</div>
                 <div class="soft-badge">{score_str}</div>
               </div>
-              <div class="kanban-meta">{contatos_disponiveis}{alerta_contato}</div>
-              <div class="kanban-meta">📍 {lead.get('cidade') or 'N/A'}</div>
-              <div class="kanban-meta">🧠 ICP: {icp}</div>
-              {f'<div class="kanban-meta">💰 Valor: R$ {valor_proposta:,.2f}</div>' if valor_proposta > 0 else ''}
+              <div class="kanban-meta kanban-contatos">{contatos_disponiveis}{alerta_contato}</div>
+              <div class="kanban-meta">{lead.get('cidade') or 'N/A'}</div>
+              <div class="kanban-meta">ICP: {icp}</div>
+              {f'<div class="kanban-meta">Valor: R$ {valor_proposta:,.2f}</div>' if valor_proposta > 0 else ''}
             </div>
             """,
             unsafe_allow_html=True,
@@ -1067,6 +1069,18 @@ st.markdown(
                 box-shadow: 0 0 25px rgba(37, 104, 255, 0.18);
       }
 
+      .stButton > button[kind="primary"],
+      .stButton > button[data-testid="stBaseButton-primary"] {
+                border: none;
+                background: linear-gradient(90deg, var(--accent), var(--secondary));
+                color: #fff;
+      }
+      .stButton > button[kind="primary"]:hover,
+      .stButton > button[data-testid="stBaseButton-primary"]:hover {
+                background: linear-gradient(90deg, var(--secondary), var(--primary));
+                box-shadow: 0 0 28px rgba(0, 110, 253, 0.32);
+      }
+
       .stTextInput > div > div > input,
       .stNumberInput > div > div > input,
       .stSelectbox > div > div > div,
@@ -1119,6 +1133,12 @@ st.markdown(
         color: var(--muted);
         font-size: 0.8rem;
         margin-top: 0.25rem;
+      }
+
+      .kanban-contatos {
+        color: var(--primary);
+        font-weight: 600;
+        letter-spacing: 0.02em;
       }
 
       .css-1d391kg {
@@ -1446,7 +1466,7 @@ if aba_funil:
         with cols[i]:
             leads_na_etapa = dados_funil[dados_funil["status"] == etapa]
             total_valor_etapa = leads_na_etapa['valor_proposta'].sum()
-            st.subheader(f"{etapa} ({len(leads_na_etapa)})", divider="rainbow")
+            st.subheader(f"{etapa} ({len(leads_na_etapa)})", divider="blue")
             st.caption(f"Valor em propostas: R$ {total_valor_etapa:,.2f}")
             for _, lead in leads_na_etapa.sort_values("pontuacao", ascending=False).iterrows():
                 _render_kanban_card(lead, etapa)
