@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-labelledby="title desc">
+  <title id="title">SCORPIONS technological S mark</title>
+  <desc id="desc">Geometric S made from circuit traces and connection nodes.</desc>
+  <defs>
+    <linearGradient id="scorpions-blue" x1="20" y1="40" x2="220" y2="200" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff"/>
+      <stop offset=".55" stop-color="#70d3fc"/>
+      <stop offset="1" stop-color="#256bff"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#scorpions-blue)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M184 52H87c-28 0-46 14-46 35s18 31 46 36l66 13c28 5 46 18 46 39s-18 35-46 35H54"/>
+    <path d="M184 52l18-18M184 52l18 18M54 210l-18-18M54 210l18 18"/>
+    <path d="M76 90H42M164 150h34M92 70l-18-18M148 170l18 18" opacity=".7"/>
+  </g>
+  <g fill="#70d3fc">
+    <circle cx="202" cy="34" r="6"/><circle cx="202" cy="70" r="6"/>
+    <circle cx="36" cy="192" r="6"/><circle cx="72" cy="228" r="6"/>
+    <circle cx="42" cy="90" r="5"/><circle cx="198" cy="150" r="5"/>
+    <circle cx="74" cy="52" r="5"/><circle cx="166" cy="188" r="5"/>
+  </g>
+  <path d="M108 112h24l-10 12h16" fill="none" stroke="#006efd" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

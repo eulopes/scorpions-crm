@@ -1,0 +1,27 @@
+# Ambientes virtuais
+.venv/
+.venv-1/
+.venv-2/
+__pycache__/
+*.pyc
+
+# Symlinks de tooling que apontam para dentro do venv
+.agents/
+.claude/skills/
+
+# Segredos - nunca versionar
+.streamlit/secrets.toml
+
+# Banco de dados e backups locais (dados reais de clientes/leads)
+*.db
+*.db-journal
+scorpions_base_legacy_backup.db
+
+# Logs
+*.log
+*.stdout.log
+*.stderr.log
+
+# Arquivos de IDE / SO
+.vscode/settings.json
+Thumbs.db

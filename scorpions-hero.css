@@ -1,0 +1,163 @@
+:root {
+    --scorp-black: #050608;
+    --scorp-dark: #0a0d12;
+    --scorp-panel: #111721;
+    --scorp-blue: #2568ff;
+    --scorp-cyan: #70d3fc;
+    --scorp-white: #f5f7fa;
+    --scorp-muted: #8a94a6;
+    --scorp-line: rgba(112, 211, 252, 0.22);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: var(--scorp-black);
+    color: var(--scorp-white);
+    font-family: "Inter", Arial, sans-serif;
+    overflow-x: hidden;
+}
+
+.hero {
+    position: relative;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 75% 50%, rgba(37, 104, 255, 0.12), transparent 35%),
+        var(--scorp-black);
+}
+
+.hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(rgba(112, 211, 252, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(112, 211, 252, 0.035) 1px, transparent 1px);
+    background-size: 60px 60px;
+    mask-image: linear-gradient(to bottom, black, transparent);
+    pointer-events: none;
+}
+
+.hero-content {
+    position: relative;
+    z-index: 2;
+    width: min(1200px, 90%);
+    margin: auto;
+}
+
+.hero-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--scorp-cyan);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+}
+
+.hero-label::before {
+    content: "";
+    width: 35px;
+    height: 1px;
+    background: var(--scorp-cyan);
+}
+
+.hero h1 {
+    max-width: 850px;
+    margin-top: 25px;
+    font-size: clamp(48px, 8vw, 100px);
+    line-height: 0.95;
+    letter-spacing: -4px;
+    font-weight: 700;
+}
+
+.hero h1 span {
+    background: linear-gradient(90deg, #ffffff, var(--scorp-cyan), var(--scorp-blue));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+.hero p {
+    max-width: 600px;
+    margin-top: 30px;
+    color: var(--scorp-muted);
+    font-size: 18px;
+    line-height: 1.7;
+}
+
+.hero-button {
+    display: inline-flex;
+    margin-top: 40px;
+    padding: 15px 25px;
+    border: 1px solid rgba(112, 211, 252, 0.4);
+    border-radius: 4px;
+    color: white;
+    text-decoration: none;
+    background: rgba(37, 104, 255, 0.08);
+    transition: 0.3s ease;
+}
+
+.hero-button:hover {
+    border-color: var(--scorp-cyan);
+    background: rgba(37, 104, 255, 0.18);
+    box-shadow: 0 0 25px rgba(37, 104, 255, 0.18);
+}
+
+.hero-mark {
+    position: absolute;
+    right: 11%;
+    top: 50%;
+    z-index: 1;
+    width: min(32vw, 390px);
+    transform: translateY(-50%);
+    opacity: 0.9;
+    filter: drop-shadow(0 0 26px rgba(37, 104, 255, 0.15));
+}
+
+.circuit {
+    position: absolute;
+    right: 5%;
+    top: 50%;
+    z-index: 1;
+    width: min(500px, 42vw);
+    height: min(500px, 42vw);
+    transform: translateY(-50%);
+    opacity: 0.8;
+    pointer-events: none;
+}
+
+.circuit-line {
+    position: absolute;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--scorp-blue), var(--scorp-cyan));
+    box-shadow: 0 0 8px rgba(37, 104, 255, 0.5);
+}
+
+.circuit-node {
+    position: absolute;
+    width: 7px;
+    height: 7px;
+    border: 1px solid var(--scorp-cyan);
+    border-radius: 50%;
+    background: var(--scorp-black);
+    box-shadow: 0 0 10px rgba(112, 211, 252, 0.7);
+}
+
+.circuit-line.one { width: 180px; top: 25%; left: 15%; transform: rotate(25deg); }
+.circuit-line.two { width: 240px; top: 45%; left: 20%; transform: rotate(-20deg); }
+.circuit-line.three { width: 150px; top: 65%; left: 35%; transform: rotate(35deg); }
+.circuit-node.one { top: 19%; left: 11%; }
+.circuit-node.two { top: 42%; left: 15%; }
+.circuit-node.three { top: 70%; left: 31%; }
+
+@media (max-width: 760px) {
+    .hero-mark { position: relative; right: auto; top: auto; width: 180px; margin: 56px auto 0; transform: none; display: block; }
+    .circuit { right: -72px; top: 58%; width: 300px; height: 300px; opacity: 0.45; }
+    .hero { padding: 72px 0; align-items: flex-start; }
+    .hero h1 { letter-spacing: -2px; }
+}
