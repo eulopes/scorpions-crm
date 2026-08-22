@@ -178,48 +178,19 @@ def _usuarios_autenticacao() -> dict[str, str]:
         return {}
 
 
+@st.cache_resource
+def carregar_tema_css() -> str:
+    """Lê theme.css uma única vez por processo. Editar esse arquivo e reiniciar
+    o Streamlit (ou limpar o cache) já reflete no visual, sem tocar em app.py."""
+    return (APP_DIR / "theme.css").read_text(encoding="utf-8")
+
+
 def exigir_login() -> None:
-    """Bloqueia o restante do app até o usuário autenticar com usuário/senha."""
+    """Bloqueia o restante do app até o usuário autenticar com usuário/senha.
+    O CSS (tema + estilo do card de login) já foi injetado mais acima, antes
+    desta função ser chamada — ver carregar_tema_css() e theme.css."""
     if st.session_state.get("autenticado"):
         return
-
-    st.markdown(
-        """
-        <style>
-          .st-key-login_card {
-            max-width: 380px;
-            margin: 10vh auto 0;
-            background: rgba(17, 23, 33, 0.92);
-            border: 1px solid var(--line);
-            border-radius: 6px;
-            padding: 2.2rem 2rem 1.8rem;
-            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
-          }
-          .login-eyebrow {
-            color: var(--primary);
-            font-size: 0.7rem;
-            font-weight: 600;
-            letter-spacing: 0.32em;
-            text-transform: uppercase;
-            text-align: center;
-          }
-          .login-title {
-            font-family: Orbitron, Inter, sans-serif;
-            font-size: 1.6rem;
-            letter-spacing: 0.18em;
-            text-align: center;
-            margin: 0.5rem 0 0.15rem;
-          }
-          .login-sub {
-            color: var(--muted);
-            font-size: 0.8rem;
-            text-align: center;
-            margin-bottom: 1.6rem;
-          }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
 
     agora = time.time()
     estado = _estado_login()
@@ -1084,6 +1055,8 @@ def _render_kanban_card(lead: pd.Series, etapa_atual: str) -> None:
             if nova_etapa != etapa_atual:
                 atualizar_etapa_funil(int(lead["id"]), nova_etapa)
                 st.cache_data.clear()
+                st.toast(f"Lead movido para \"{nova_etapa}\".", icon=":material/check_circle:")
+                st.rerun()
         with col_abrir:
             if st.button("Abrir", key=f"abrir_{lead['id']}", use_container_width=True):
                 st.session_state["busca_empresas"] = lead["nome_empresa"]
@@ -1093,593 +1066,7 @@ def _render_kanban_card(lead: pd.Series, etapa_atual: str) -> None:
 st.set_page_config(page_title="Scorpions CRM", page_icon=":material/monitoring:", layout="wide")
 google_places_configurado = configurar_google_places()
 
-st.markdown(
-    """
-    <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;600;700;800&display=swap');
-
-      :root {
-                --bg: #07090D;
-                --panel: #0D1118;
-                --panel-strong: #0A0C11;
-                --line: #1C2735;
-                --line-strong: #2D333D;
-                --text: #F4F7FB;
-                --text-secondary: #C3CBD8;
-                --muted: #7F8B9B;
-                --weak: #5A6373;
-                --primary: #70D3FC;
-                --secondary: #2568FF;
-                --accent: #0D6EFD;
-                --danger: #FF667D;
-                --danger-strong: #ffb3b3;
-                --success: #35D07F;
-                --warning: #F3C75F;
-      }
-
-      html, body, .stApp, [class*="css"] { font-family: Inter, system-ui, sans-serif; }
-
-      .stApp {
-                background:
-                    radial-gradient(circle at 78% 0%, rgba(37, 104, 255, 0.10), transparent 42%),
-                    var(--bg);
-        color: var(--text);
-      }
-
-      :focus-visible { outline: 1px solid var(--primary) !important; outline-offset: 2px !important; }
-
-            .stApp::before {
-                content: "";
-                position: fixed;
-                inset: 0;
-                background-image:
-                    linear-gradient(rgba(112, 211, 252, 0.025) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(112, 211, 252, 0.025) 1px, transparent 1px);
-                background-size: 60px 60px;
-                mask-image: linear-gradient(to bottom, black, transparent 78%);
-                pointer-events: none;
-                z-index: 0;
-            }
-
-      [data-testid="stHeader"] {
-        background: rgba(6, 17, 28, 0.7);
-        backdrop-filter: blur(10px);
-      }
-
-      .block-container {
-                padding-top: 2rem;
-                padding-bottom: 3rem;
-                max-width: 1500px;
-      }
-
-            [data-testid="stSidebar"] {
-                background: var(--bg);
-                border-right: 1px solid var(--line);
-            }
-
-            [data-testid="stSidebar"] .block-container {
-                padding: 1.25rem 1rem 1.5rem;
-            }
-
-            [data-testid="stSidebar"] img {
-                border: 1px solid var(--line);
-                border-radius: 8px;
-                filter: brightness(1.35) contrast(1.1);
-            }
-
-            .brand-lockup {
-                padding: 0.35rem 0.5rem 1.1rem;
-                border-bottom: 1px solid var(--line);
-                margin-bottom: 0.9rem;
-            }
-
-            .brand-lockup strong {
-                display: block;
-                color: var(--text);
-                font-family: Orbitron, Inter, sans-serif;
-                font-weight: 700;
-                font-size: 0.95rem;
-                letter-spacing: 0.22em;
-            }
-
-            .brand-lockup span {
-                color: var(--primary);
-                font-size: 0.6rem;
-                letter-spacing: 0.18em;
-                text-transform: uppercase;
-            }
-
-            .sidebar-caption {
-                color: var(--weak);
-                font-size: 0.65rem;
-                letter-spacing: 0.2em;
-                text-transform: uppercase;
-                margin: 1.1rem 0 0.4rem;
-                padding: 0 0.5rem;
-            }
-
-            .sidebar-status {
-                display: flex;
-                align-items: center;
-                gap: 0.5rem;
-                color: var(--muted);
-                font-size: 0.72rem;
-                padding: 0 0.5rem;
-                margin-bottom: 0.6rem;
-            }
-
-            .sidebar-status .dot {
-                width: 6px;
-                height: 6px;
-                border-radius: 50%;
-                background: var(--primary);
-                flex: none;
-                animation: scorp-pulse 2.2s infinite;
-            }
-
-            @keyframes scorp-pulse {
-                0% { box-shadow: 0 0 0 0 rgba(125, 211, 252, .5); }
-                100% { box-shadow: 0 0 0 7px rgba(125, 211, 252, 0); }
-            }
-            @keyframes scorp-trace {
-                0% { transform: translateX(-100%); }
-                100% { transform: translateX(300%); }
-            }
-            .trace-line {
-                position: relative;
-                height: 1px;
-                overflow: hidden;
-                background: var(--line);
-                margin-bottom: 0.9rem;
-            }
-            .trace-line::after {
-                content: "";
-                position: absolute;
-                top: 0; left: 0;
-                width: 40%; height: 1px;
-                background: linear-gradient(90deg, transparent, var(--secondary), var(--primary));
-                animation: scorp-trace 4s linear infinite;
-            }
-
-            [data-testid="stSidebar"] [data-testid="stTextInput"] input {
-                background: var(--panel);
-                border-color: rgba(125, 211, 252, .18);
-                font-size: 0.8rem;
-            }
-
-      .header-shell, .st-key-header_shell {
-                position: relative;
-                z-index: 1;
-                background: rgba(17, 19, 25, 0.86);
-                backdrop-filter: blur(10px);
-        border: 1px solid var(--line);
-                border-radius: 4px;
-        padding: 1.25rem 1.35rem 1rem 1.35rem;
-        margin-bottom: 1.25rem;
-        box-shadow: 0 16px 38px rgba(0, 0, 0, 0.24);
-      }
-
-      .st-key-header_shell .stButton > button { padding: 0.5rem 0.9rem; font-size: 0.8rem; margin-top: 0.6rem; }
-
-      .sales-summary {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 0.7rem;
-        margin: 0 0 1.2rem 0;
-      }
-
-      .sales-summary__item {
-                position: relative;
-                overflow: hidden;
-                background: linear-gradient(180deg, var(--panel), var(--panel-strong));
-        border: 1px solid var(--line);
-                border-radius: 4px;
-        padding: 0.9rem 1rem;
-        min-height: 94px;
-                transition: border-color 0.2s ease;
-      }
-
-      .sales-summary__item::before {
-                content: "";
-                position: absolute;
-                top: 0; left: 0; right: 0;
-                height: 1px;
-                background: linear-gradient(90deg, transparent, rgba(125, 211, 252, .45), transparent);
-      }
-
-      .sales-summary__item.accent {
-                border-color: rgba(125, 211, 252, .3);
-      }
-
-      .sales-summary__item .label {
-        display: block;
-        color: var(--weak);
-        font-size: 0.68rem;
-        text-transform: uppercase;
-        letter-spacing: 0.14em;
-      }
-
-      .sales-summary__item strong {
-        display: block;
-        margin-top: 0.5rem;
-        font-family: Orbitron, Inter, sans-serif;
-        font-weight: 600;
-        font-size: 1.55rem;
-        line-height: 1.2;
-        color: var(--text);
-        letter-spacing: 0.01em;
-      }
-
-      .sales-summary__item .note {
-        display: block;
-        margin-top: 0.2rem;
-        font-size: 0.72rem;
-        color: var(--muted);
-      }
-
-      .title-badge {
-        display: inline-block;
-                background: transparent;
-                color: var(--primary);
-        border: 1px solid rgba(125, 211, 252, .28);
-                border-radius: 3px;
-        font-size: 0.65rem;
-        font-weight: 700;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        padding: 0.2rem 0.55rem;
-      }
-
-      .header-shell h1, .st-key-header_shell h1 {
-        margin: 0.7rem 0 0.2rem 0;
-        font-family: Orbitron, Inter, sans-serif;
-        font-weight: 600;
-        font-size: 1.7rem;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        line-height: 1.1;
-      }
-
-      .header-shell p, .st-key-header_shell p {
-        margin: 0;
-        color: var(--muted);
-        font-size: 0.92rem;
-      }
-
-      .status-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4rem;
-        background: transparent;
-        border: 1px solid rgba(125, 211, 252, .28);
-        color: var(--primary);
-        border-radius: 999px;
-        padding: 0.32rem 0.7rem;
-        font-weight: 600;
-        font-size: 0.72rem;
-        letter-spacing: 0.04em;
-      }
-
-      .status-pill::before {
-        content: "";
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--primary);
-        display: inline-block;
-        animation: scorp-pulse 2.2s infinite;
-      }
-
-      div[data-testid="stMetricContainer"] {
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 4px;
-        padding: 0.85rem 1rem;
-      }
-
-      .stDataFrame, .stTable {
-        border: 1px solid var(--line);
-        border-radius: 4px;
-        overflow: hidden;
-      }
-
-      .stButton > button {
-                border-radius: 4px;
-                border: 1px solid var(--line-strong);
-                background: transparent;
-                color: var(--text);
-        font-weight: 600;
-        font-size: 0.82rem;
-        transition: border-color 0.15s ease, background 0.15s ease;
-      }
-
-      .stButton > button:hover {
-                border-color: var(--primary);
-                background: rgba(37, 104, 255, 0.14);
-                color: var(--text);
-      }
-
-      .stButton > button[kind="primary"],
-      .stButton > button[data-testid="stBaseButton-primary"] {
-                border: 1px solid rgba(125, 211, 252, .45);
-                background: linear-gradient(90deg, var(--accent), var(--secondary));
-                color: #fff;
-                box-shadow: 0 0 22px rgba(37, 104, 255, .28);
-      }
-      .stButton > button[kind="primary"]:hover,
-      .stButton > button[data-testid="stBaseButton-primary"]:hover {
-                filter: brightness(1.12);
-                box-shadow: 0 0 28px rgba(37, 104, 255, .38);
-      }
-
-      .stTextInput > div > div > input,
-      .stNumberInput > div > div > input,
-      .stDateInput > div > div > input,
-      .stTimeInput > div > div > input,
-      .stSelectbox > div > div > div,
-      .stSelectbox > div > div > div > div,
-      .stTextArea > div > div > textarea {
-        background: var(--bg);
-        color: var(--text);
-        border: 1px solid var(--line-strong);
-        border-radius: 3px;
-        font-size: 0.82rem;
-      }
-
-      .stAlert {
-        border-radius: 4px;
-        background: var(--panel) !important;
-        border: 1px solid var(--line) !important;
-      }
-      .stAlert p { color: var(--text-secondary) !important; }
-      div[data-testid="stAlertContentInfo"] svg { color: var(--primary) !important; }
-      div[data-testid="stAlertContentSuccess"] svg { color: var(--primary) !important; }
-      div[data-testid="stAlertContentWarning"] svg { color: #caa86a !important; }
-      div[data-testid="stAlertContentError"] svg { color: var(--danger) !important; }
-
-      .soft-badge {
-                font-family: Orbitron, Inter, sans-serif;
-                background: rgba(37, 104, 255, 0.12);
-                border: 1px solid rgba(125, 211, 252, 0.35);
-                color: var(--primary);
-                border-radius: 3px;
-        padding: 0.15rem 0.5rem;
-        font-size: 0.68rem;
-        font-weight: 600;
-      }
-
-      .kanban-card {
-                background: var(--panel);
-                border: 1px solid var(--line);
-                border-radius: 4px;
-        padding: 0.9rem 0.9rem 0.7rem;
-        margin-bottom: 0.8rem;
-                transition: border-color .15s ease, box-shadow .15s ease;
-      }
-      .kanban-card:hover {
-                border-color: rgba(125, 211, 252, .4);
-                box-shadow: 0 0 20px rgba(37, 104, 255, .12);
-      }
-
-      .kanban-topline {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.5rem;
-        margin-bottom: 0.45rem;
-      }
-
-      .kanban-company {
-        font-weight: 600;
-        font-size: 0.92rem;
-        line-height: 1.3;
-        color: var(--text);
-      }
-
-      .kanban-meta {
-        color: var(--muted);
-        font-size: 0.76rem;
-        margin-top: 0.25rem;
-      }
-
-      .kanban-contatos {
-        color: var(--primary);
-        font-weight: 600;
-        letter-spacing: 0.02em;
-      }
-
-      .css-1d391kg {
-        color: var(--text) !important;
-      }
-
-      .app-footer {
-        margin-top: 2rem;
-        padding-top: 1rem;
-        border-top: 1px solid var(--line);
-        color: var(--weak);
-        font-size: 0.76rem;
-        display: flex;
-        justify-content: space-between;
-        gap: 1rem;
-        flex-wrap: wrap;
-      }
-
-      ::-webkit-scrollbar { width: 10px; height: 10px; }
-      ::-webkit-scrollbar-track { background: var(--bg); }
-      ::-webkit-scrollbar-thumb {
-        background: var(--line-strong);
-        border-radius: 999px;
-      }
-      ::-webkit-scrollbar-thumb:hover { background: rgba(125, 211, 252, 0.45); }
-
-      [data-testid="stSidebar"] [role="radiogroup"] {
-        gap: 1px;
-      }
-      [data-testid="stSidebar"] [role="radiogroup"] label {
-        border-radius: 0 3px 3px 0;
-        border-left: 2px solid transparent;
-        padding: 0.5rem 0.6rem;
-        color: var(--muted);
-        font-size: 0.82rem;
-        transition: background 0.15s ease, color 0.15s ease;
-      }
-      [data-testid="stSidebar"] [role="radiogroup"] label:hover {
-        background: var(--panel);
-        color: var(--text);
-      }
-      [data-testid="stSidebar"] [role="radiogroup"] label[data-checked="true"],
-      [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
-        background: rgba(37, 104, 255, 0.12);
-        border-left-color: var(--primary);
-        color: var(--text);
-        font-weight: 600;
-      }
-      [data-testid="stSidebar"] [role="radiogroup"] label > div:first-child {
-        display: none;
-      }
-
-      .stTabs [data-baseweb="tab-list"] {
-        gap: 0.4rem;
-        border-bottom: 1px solid var(--line);
-      }
-      .stTabs [data-baseweb="tab"] {
-        color: var(--muted);
-        font-weight: 600;
-        font-size: 0.85rem;
-      }
-      .stTabs [aria-selected="true"] {
-        color: var(--text) !important;
-      }
-      .stTabs [data-baseweb="tab-highlight"] {
-        background: linear-gradient(90deg, var(--accent), var(--primary)) !important;
-        height: 2px;
-      }
-
-      /* --- Chips --- */
-      .chip {
-        display: inline-block;
-        font-size: 0.62rem;
-        letter-spacing: 0.06em;
-        padding: 0.12rem 0.5rem;
-        border-radius: 3px;
-        white-space: nowrap;
-      }
-      .chip-accent { color: var(--primary); border: 1px solid rgba(125,211,252,.28); background: rgba(37,104,255,.1); }
-      .chip-neutral { color: var(--muted); border: 1px solid var(--line-strong); background: transparent; }
-      .chip-alert { color: var(--danger); border: 1px solid rgba(255,107,107,.35); background: rgba(255,107,107,.08); }
-
-      /* --- Score badge --- */
-      .score-badge {
-        font-family: Orbitron, Inter, sans-serif;
-        font-size: 0.68rem;
-        padding: 0.12rem 0.5rem;
-        border-radius: 3px;
-        flex: none;
-      }
-      .score-hi { color: var(--primary); border: 1px solid rgba(125,211,252,.35); background: rgba(37,104,255,.12); }
-      .score-mid { color: var(--text-secondary); border: 1px solid var(--line-strong); background: var(--bg); }
-      .score-lo { color: var(--muted); border: 1px solid var(--line-strong); background: var(--bg); }
-
-      /* --- Funil / stage bars (dashboard) --- */
-      .funnel-row { margin-bottom: 0.9rem; }
-      .funnel-row:last-child { margin-bottom: 0; }
-      .funnel-row .funnel-top {
-        display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--muted);
-      }
-      .funnel-row .funnel-top .val { color: var(--text); }
-      .funnel-row .funnel-top .sep { color: var(--weak); }
-      .funnel-track {
-        height: 6px; background: var(--line); border-radius: 999px; margin-top: 0.45rem; overflow: hidden;
-      }
-      .funnel-fill {
-        height: 6px; border-radius: 999px;
-        background: linear-gradient(90deg, var(--accent), var(--primary));
-        box-shadow: 0 0 10px rgba(37, 104, 255, .5);
-      }
-
-      /* --- ICP rows --- */
-      .icp-row {
-        display: flex; align-items: center; gap: 0.6rem; font-size: 0.8rem;
-        padding: 0.3rem 0; color: var(--text);
-      }
-      .icp-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .icp-row .leads { font-size: 0.72rem; color: var(--muted); }
-
-      .icp-alert {
-        margin-top: 1rem;
-        background: rgba(37, 104, 255, .06);
-        border: 1px solid rgba(125, 211, 252, .22);
-        border-left: 2px solid var(--primary);
-        border-radius: 3px;
-        padding: 0.75rem 0.9rem;
-      }
-      .icp-alert .icp-alert-title { font-size: 0.8rem; font-weight: 600; color: var(--primary); }
-      .icp-alert p { font-size: 0.74rem; color: var(--muted); margin: 0.3rem 0 0.6rem; line-height: 1.6; }
-
-      /* --- Attention cards --- */
-      .attn-card {
-        background: var(--panel-strong); border: 1px solid var(--line); border-radius: 4px;
-        padding: 0.8rem 0.9rem; height: 100%; transition: border-color .15s ease;
-      }
-      .attn-card:hover { border-color: rgba(125,211,252,.3); }
-      .attn-kicker { font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; }
-      .attn-title { font-size: 0.86rem; font-weight: 600; margin-top: 0.35rem; color: var(--text); }
-      .attn-note { font-size: 0.74rem; color: var(--muted); margin-top: 0.2rem; line-height: 1.5; }
-
-      /* --- Dashed empty state --- */
-      .dashed-empty {
-        border: 1px dashed var(--line-strong); border-radius: 4px; padding: 1.6rem 1.2rem;
-      }
-      .dashed-empty .dashed-title {
-        font-family: Orbitron, Inter, sans-serif; font-size: 0.78rem; font-weight: 600;
-        letter-spacing: 0.1em; text-transform: uppercase; color: var(--text);
-      }
-      .dashed-empty p { font-size: 0.78rem; color: var(--muted); margin: 0.4rem 0 0; line-height: 1.6; }
-
-      /* --- Source chips row (prospecção) --- */
-      .source-chip-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0 0.2rem; }
-
-      /* --- Campaign cards (automação) --- */
-      .campaign-card {
-        background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 0.9rem 1rem;
-        transition: border-color .15s ease;
-      }
-      .campaign-card:hover { border-color: rgba(125,211,252,.3); }
-      .campaign-card .head { display: flex; align-items: center; gap: 0.5rem; }
-      .campaign-card .head .name { font-size: 0.88rem; font-weight: 600; flex: 1; min-width: 0; }
-      .campaign-card .scope { font-size: 0.74rem; color: var(--muted); margin-top: 0.3rem; }
-      .campaign-card .metrics {
-        display: flex; gap: 1.1rem; margin-top: 0.8rem; padding-top: 0.7rem; border-top: 1px solid var(--line);
-      }
-      .campaign-card .metrics .m-label { font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--weak); }
-      .campaign-card .metrics .m-val { font-family: Orbitron, Inter, sans-serif; font-size: 0.9rem; margin-top: 0.15rem; color: var(--text); }
-
-      /* --- Detail cards grid (empresas) --- */
-      .detail-card, .st-key-cnpj_card, .st-key-delete_card, .st-key-detalhe_empresa_card,
-      .st-key-criar_equipe_card, .st-key-criar_usuario_card {
-        background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1rem 1.1rem; height: 100%;
-      }
-      .detail-card.danger-card, .st-key-delete_card { border-color: rgba(255,107,107,.2); }
-      .detail-card h4, .card-title {
-        margin: 0; font-family: Orbitron, Inter, sans-serif; font-size: 0.76rem; font-weight: 600;
-        letter-spacing: 0.1em; text-transform: uppercase; color: var(--text);
-      }
-      .detail-card.danger-card h4, .card-title.danger { color: var(--danger); }
-      .detail-card p, .card-note { font-size: 0.74rem; color: var(--muted); margin: 0.4rem 0 0.7rem; }
-
-      .detail-label { font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--weak); }
-      .detail-value { font-size: 0.82rem; margin-top: 0.15rem; color: var(--text-secondary); }
-
-      /* --- Streamlit dialog (delete confirmation) --- */
-      div[data-testid="stDialog"] div[role="dialog"] {
-        background: var(--panel);
-        border: 1px solid rgba(255, 107, 107, .3);
-        border-radius: 4px;
-      }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown(f"<style>{carregar_tema_css()}</style>", unsafe_allow_html=True)
 
 iniciar_banco()
 iniciar_banco_automacao()
@@ -1845,7 +1232,7 @@ if aba_dashboard:
     st.markdown(
         """
         <div class="sales-summary">
-          <div class="sales-summary__item">
+          <div class="sales-summary__item accent">
             <span class="label">Leads na base</span>
             <strong>{}</strong>
             <span class="note" style="color:#7DD3FC">+{} este mês</span>
@@ -2148,7 +1535,31 @@ if aba_dashboard:
                     },
                 )
     else:
-        st.info("Sua base ainda está vazia. Busque ou cadastre o primeiro lead.")
+        st.markdown(
+            """
+            <div class="dashed-empty" style="text-align:center;padding:2.2rem 1.5rem;">
+                <div style="font-size:2rem;margin-bottom:0.6rem;">🔍</div>
+                <div class="dashed-title" style="font-size:1rem;">Vamos começar?</div>
+                <p style="max-width:32rem;margin-left:auto;margin-right:auto;">
+                    Você ainda não tem leads na base. Escolha um caminho para começar a preencher o pipeline.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        col_vazio_prospectar, col_vazio_manual = st.columns(2)
+        with col_vazio_prospectar:
+            if st.button(
+                "🔍 Prospectar da web", key="vazio_prospectar", type="primary", use_container_width=True
+            ):
+                st.session_state["navegacao_solicitada"] = "Prospecção"
+                st.rerun()
+        with col_vazio_manual:
+            if st.button(
+                "✍️ Cadastrar manualmente", key="vazio_manual", use_container_width=True
+            ):
+                st.session_state["navegacao_solicitada"] = "Nova empresa"
+                st.rerun()
 
 if aba_funil:
     st.subheader("Pipeline comercial")
@@ -2234,6 +1645,10 @@ if aba_prospeccao:
 
     st.subheader("Prospecção")
     st.markdown('<div class="trace-line"></div>', unsafe_allow_html=True)
+
+    aviso_prospeccao = st.session_state.pop("aviso_prospeccao", None)
+    if aviso_prospeccao:
+        st.success(aviso_prospeccao)
     c1, c2, c3 = st.columns([2, 2, 1])
     nicho_busca = c1.text_input(
         "Nicho ou segmento",
@@ -2360,7 +1775,9 @@ if aba_prospeccao:
         )
         if st.button("Adicionar resultados à base"):
             inseridos, duplicados = salvar_leads(resultados)
-            st.success(f"{inseridos} lead(s) adicionado(s). {duplicados} duplicado(s) ignorado(s).")
+            st.toast(f"{inseridos} lead(s) adicionado(s) à base.", icon=":material/check_circle:")
+            st.session_state["aviso_prospeccao"] = f"{inseridos} lead(s) adicionado(s). {duplicados} duplicado(s) ignorado(s)."
+            st.rerun()
 
 @st.dialog("Excluir campanha?")
 def _confirmar_exclusao_campanha(campanha_id: int, nome: str) -> None:
@@ -2385,6 +1802,7 @@ def _confirmar_exclusao_campanha(campanha_id: int, nome: str) -> None:
             excluir_campanha(campanha_id)
             st.session_state["confirmar_exclusao_campanha_id"] = None
             st.session_state["aviso_automacao"] = f"Campanha '{nome}' excluída; o histórico foi preservado."
+            st.toast(f"Campanha '{nome}' excluída.", icon=":material/delete:")
             st.rerun()
 
 
@@ -2469,6 +1887,7 @@ if aba_automacao:
                             ativa_campanha,
                         )
                         st.session_state["aviso_automacao"] = f"Campanha #{campanha_id} criada."
+                        st.toast("Campanha criada.", icon=":material/check_circle:")
                         st.rerun()
                     except ValueError as erro:
                         st.error(str(erro))
@@ -3083,6 +2502,7 @@ if aba_equipe:
                             opcoes_equipe_criacao[nova_equipe_rotulo], novo_email,
                         )
                         st.session_state["aviso_equipe"] = f"Usuário '{novo_username}' criado."
+                        st.toast(f"Usuário '{novo_username}' criado.", icon=":material/check_circle:")
                         st.rerun()
                     except ValueError as erro:
                         st.warning(str(erro))
