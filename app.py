@@ -40,6 +40,15 @@ from crm_strategy import (
     PERFIS_ICP,
     STATUS_FUNIL,
 )
+from access_control import (
+    NIVEIS,
+    ORDEM_NIVEIS,
+    niveis_administraveis_por,
+    nivel_valido,
+    paginas_visiveis,
+    pode,
+    rotulo_nivel,
+)
 from niche_sources import (
     resolver_fontes_reais,
     roteamento_por_nicho,
@@ -189,7 +198,6 @@ def exigir_login() -> None:
     )
 
     agora = time.time()
-    usuarios = _usuarios_autenticacao()
     estado = _estado_login()
     chave_ip = _chave_ip()
     bloqueio_ip = estado["por_ip"].get(chave_ip, {"tentativas": 0, "bloqueado_ate": 0.0})
@@ -199,29 +207,31 @@ def exigir_login() -> None:
         st.markdown('<div class="login-title">SCORPIONS</div>', unsafe_allow_html=True)
         st.markdown('<div class="login-sub">Soluções tecnológicas · CRM</div>', unsafe_allow_html=True)
 
-        if not usuarios:
-            st.warning(
-                "Nenhum usuário configurado ainda. Adicione a seção `[AUTH_USERS]` em "
-                "`.streamlit/secrets.toml` com `usuario = \"hash_bcrypt\"` para liberar o acesso."
-            )
-        elif agora < bloqueio_ip["bloqueado_ate"]:
+        if agora < bloqueio_ip["bloqueado_ate"]:
             restante = int(bloqueio_ip["bloqueado_ate"] - agora)
             st.error(f"Muitas tentativas incorretas a partir desta conexão. Tente novamente em {restante}s.")
         else:
             with st.form("form_login", border=False):
                 usuario = st.text_input("Usuário")
                 senha = st.text_input("Senha", type="password")
-                enviado = st.form_submit_button("Entrar", use_container_width=True)
+                enviado = st.form_submit_button("Entrar", width="stretch")
 
             if enviado:
                 # bcrypt.checkpw roda sempre (mesmo pra usuario inexistente) para nao
                 # vazar, por tempo de resposta, quais usuarios existem de verdade.
-                hash_guardado = usuarios.get(usuario, _hash_fantasma())
+                registro = buscar_usuario_por_username(usuario)
+                hash_guardado = registro["senha_hash"] if registro else _hash_fantasma()
                 senha_confere = bcrypt.checkpw(senha.encode("utf-8"), hash_guardado.encode("utf-8"))
-                valido = usuario in usuarios and senha_confere
-                if valido:
+                valido = registro is not None and senha_confere
+                if valido and registro["status"] != "ativo":
+                    st.error("Esta conta está desativada. Fale com seu gestor ou diretor.")
+                elif valido:
                     st.session_state.autenticado = True
-                    st.session_state.usuario_logado = usuario
+                    st.session_state.usuario_logado = registro["username"]
+                    st.session_state.usuario_id = registro["id"]
+                    st.session_state.nivel_usuario = registro["nivel"]
+                    st.session_state.equipe_id_usuario = registro["equipe_id"]
+                    st.session_state.nome_usuario = registro["nome"]
                     with estado["lock"]:
                         estado["por_ip"].pop(chave_ip, None)
                     st.rerun()
@@ -310,6 +320,7 @@ def iniciar_banco() -> None:
             "valor_proposta": "REAL",
             "alerta_vencido_em": "TEXT",
             "proximo_contato": "TEXT",
+            "responsavel_usuario_id": "INTEGER",
         }
         for coluna, tipo in novas_colunas.items():
             if coluna not in colunas_existentes:
@@ -344,6 +355,133 @@ def iniciar_banco() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_cnpj "
             "ON leads(cnpj) WHERE cnpj IS NOT NULL AND cnpj <> ''"
         )
+
+
+def iniciar_banco_usuarios() -> None:
+    """Cria as tabelas de equipes/usuários e migra o login legado (AUTH_USERS)
+    para a tabela `usuarios` como o primeiro diretor, sem exigir nenhuma
+    mudança em secrets.toml/variáveis de ambiente já configuradas em produção."""
+    with conectar() as conexao:
+        conexao.execute(
+            """
+            CREATE TABLE IF NOT EXISTS equipes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT NOT NULL UNIQUE,
+                criado_em TEXT NOT NULL
+            )
+            """
+        )
+        conexao.execute(
+            """
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                senha_hash TEXT NOT NULL,
+                nome TEXT NOT NULL,
+                email TEXT,
+                nivel TEXT NOT NULL,
+                equipe_id INTEGER,
+                status TEXT NOT NULL DEFAULT 'ativo',
+                criado_em TEXT NOT NULL
+            )
+            """
+        )
+        # Semeia, de forma idempotente, cada usuário já configurado em
+        # AUTH_USERS/secrets.toml como diretor — é o mesmo login que já dá
+        # acesso hoje, então ninguém fica trancado para fora ao atualizar.
+        usuarios_legados = _usuarios_autenticacao()
+        agora = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        for username, hash_bcrypt in usuarios_legados.items():
+            existe = conexao.execute(
+                "SELECT 1 FROM usuarios WHERE username = ?", (username,)
+            ).fetchone()
+            if not existe:
+                conexao.execute(
+                    """
+                    INSERT INTO usuarios (username, senha_hash, nome, nivel, status, criado_em)
+                    VALUES (?, ?, ?, 'diretor', 'ativo', ?)
+                    """,
+                    (username, hash_bcrypt, username.capitalize(), agora),
+                )
+
+
+def criar_equipe(nome: str) -> int:
+    agora = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with conectar() as conexao:
+        cursor = conexao.execute(
+            "INSERT INTO equipes (nome, criado_em) VALUES (?, ?)", (nome.strip(), agora)
+        )
+        return int(cursor.lastrowid)
+
+
+def listar_equipes() -> list[dict[str, Any]]:
+    with conectar() as conexao:
+        linhas = conexao.execute("SELECT * FROM equipes ORDER BY nome").fetchall()
+    return [dict(linha) for linha in linhas]
+
+
+def criar_usuario(
+    username: str, senha: str, nome: str, nivel: str, equipe_id: int | None, email: str = ""
+) -> int:
+    if not username.strip() or not senha or not nome.strip():
+        raise ValueError("Usuário, senha e nome são obrigatórios.")
+    if not nivel_valido(nivel):
+        raise ValueError(f"Nível inválido: {nivel}")
+    senha_hash = bcrypt.hashpw(senha.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    agora = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with conectar() as conexao:
+        cursor = conexao.execute(
+            """
+            INSERT INTO usuarios (username, senha_hash, nome, email, nivel, equipe_id, status, criado_em)
+            VALUES (?, ?, ?, ?, ?, ?, 'ativo', ?)
+            """,
+            (username.strip(), senha_hash, nome.strip(), email.strip(), nivel, equipe_id, agora),
+        )
+        return int(cursor.lastrowid)
+
+
+def buscar_usuario_por_username(username: str) -> dict[str, Any] | None:
+    with conectar() as conexao:
+        linha = conexao.execute(
+            "SELECT * FROM usuarios WHERE username = ?", (username,)
+        ).fetchone()
+    return dict(linha) if linha else None
+
+
+def listar_usuarios(equipe_id: int | None = None, niveis: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
+    sql = (
+        "SELECT usuarios.*, equipes.nome AS equipe_nome FROM usuarios "
+        "LEFT JOIN equipes ON equipes.id = usuarios.equipe_id WHERE 1=1"
+    )
+    parametros: list[Any] = []
+    if equipe_id is not None:
+        sql += " AND usuarios.equipe_id = ?"
+        parametros.append(equipe_id)
+    if niveis:
+        sql += " AND usuarios.nivel IN ({})".format(",".join("?" for _ in niveis))
+        parametros.extend(niveis)
+    sql += " ORDER BY usuarios.nome"
+    with conectar() as conexao:
+        linhas = conexao.execute(sql, parametros).fetchall()
+    return [dict(linha) for linha in linhas]
+
+
+def alternar_status_usuario(usuario_id: int) -> str:
+    with conectar() as conexao:
+        linha = conexao.execute("SELECT status FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
+        novo_status = "inativo" if linha and linha["status"] == "ativo" else "ativo"
+        conexao.execute("UPDATE usuarios SET status = ? WHERE id = ?", (novo_status, usuario_id))
+    return novo_status
+
+
+def atribuir_lead_a_usuario(lead_id: int, usuario_id: int | None) -> None:
+    agora = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with conectar() as conexao:
+        conexao.execute(
+            "UPDATE leads SET responsavel_usuario_id = ?, atualizado_em = ? WHERE id = ?",
+            (usuario_id, agora, lead_id),
+        )
+    st.cache_data.clear()
 
 
 def limpar_cnpj(cnpj: str) -> str:
@@ -655,13 +793,42 @@ def gerar_demonstracao(nicho: str, localizacao: str, limite: int) -> list[dict[s
 
 
 def salvar_leads(leads: list[dict[str, Any]]) -> tuple[int, int]:
-    return salvar_leads_no_banco(leads)
+    # Quem cadastra vira o responsável até alguém reatribuir a carteira na
+    # página "Equipe" — cobre os 4 pontos de entrada (manual, prospecção,
+    # extração por URL, consulta de CNPJ) num lugar só.
+    usuario_atual = st.session_state.get("usuario_id")
+    leads_com_responsavel = [
+        {**lead, "responsavel_usuario_id": lead.get("responsavel_usuario_id") or usuario_atual}
+        for lead in leads
+    ]
+    return salvar_leads_no_banco(leads_com_responsavel)
 
 
 @st.cache_data
-def listar_leads(busca: str = "", nicho: str = "Todos", status: str = "Todos") -> pd.DataFrame:
-    sql = "SELECT * FROM leads WHERE 1=1"
-    parametros: list[str] = []
+def listar_leads(
+    busca: str = "",
+    nicho: str = "Todos",
+    status: str = "Todos",
+    usuario_id: int | None = None,
+    nivel: str | None = None,
+    equipe_id: int | None = None,
+) -> pd.DataFrame:
+    """`usuario_id`/`nivel`/`equipe_id` entram na assinatura (não são lidos de
+    st.session_state aqui dentro) porque o cache do Streamlit particiona pelo
+    valor dos argumentos: se o escopo viesse de session_state, dois usuários
+    diferentes poderiam receber a base cacheada um do outro."""
+    sql = "SELECT leads.* FROM leads WHERE 1=1"
+    parametros: list[Any] = []
+    escopo = pode(nivel, "escopo_leads") if nivel else "todos"
+    if escopo == "proprios":
+        sql += " AND leads.responsavel_usuario_id = ?"
+        parametros.append(usuario_id)
+    elif escopo == "equipe":
+        sql += (
+            " AND (leads.responsavel_usuario_id IS NULL OR leads.responsavel_usuario_id IN "
+            "(SELECT id FROM usuarios WHERE equipe_id = ?))"
+        )
+        parametros.append(equipe_id)
     if busca:
         sql += " AND (nome_empresa LIKE ? OR razao_social LIKE ? OR cnpj LIKE ? OR cidade LIKE ? OR endereco LIKE ?)"
         termo = f"%{busca}%"
@@ -677,6 +844,20 @@ def listar_leads(busca: str = "", nicho: str = "Todos", status: str = "Todos") -
     sql += " ORDER BY atualizado_em DESC"
     with conectar() as conexao:
         return pd.read_sql_query(sql, conexao, params=parametros)
+
+
+def leads_visiveis(busca: str = "", nicho: str = "Todos", status: str = "Todos") -> pd.DataFrame:
+    """Wrapper fino que lê o usuário logado da sessão e delega pro `listar_leads`
+    cacheado — todo ponto do app que precisa da base de leads deve chamar este,
+    não `listar_leads` direto, para não vazar o escopo de outro usuário."""
+    return listar_leads(
+        busca,
+        nicho,
+        status,
+        usuario_id=st.session_state.get("usuario_id"),
+        nivel=st.session_state.get("nivel_usuario"),
+        equipe_id=st.session_state.get("equipe_id_usuario"),
+    )
 
 
 def _valor_para_str_canonico(valor: Any, tipo: str = "str") -> str:
@@ -747,7 +928,10 @@ def atualizar_leads(editado: pd.DataFrame, original: pd.DataFrame) -> int:
                 )
                 alterados += 1
     for lead_id, descricao in atividades_pendentes:
-        registrar_atividade("lead_atualizado", descricao, lead_id)
+        registrar_atividade(
+            "lead_atualizado", descricao, lead_id,
+            usuario=st.session_state.get("usuario_logado", "sistema"),
+        )
     st.cache_data.clear()
     return alterados
 
@@ -765,6 +949,7 @@ def excluir_lead(lead_id: int) -> None:
         "lead_excluido",
         f"Lead '{nome_empresa['nome_empresa'] if nome_empresa else lead_id}' excluído da base.",
         lead_id,
+        usuario=st.session_state.get("usuario_logado", "sistema"),
     )
 
     with conectar() as conexao:
@@ -791,6 +976,7 @@ def atualizar_etapa_funil(lead_id: int, nova_etapa: str):
             "etapa_alterada",
             f"'{lead['nome_empresa']}' movido de '{lead['status']}' para '{nova_etapa}'.",
             lead_id,
+            usuario=st.session_state.get("usuario_logado", "sistema"),
         )
     st.cache_data.clear()
 
@@ -1438,7 +1624,8 @@ st.markdown(
       .campaign-card .metrics .m-val { font-family: Orbitron, Inter, sans-serif; font-size: 0.9rem; margin-top: 0.15rem; color: var(--text); }
 
       /* --- Detail cards grid (empresas) --- */
-      .detail-card, .st-key-cnpj_card, .st-key-delete_card, .st-key-detalhe_empresa_card {
+      .detail-card, .st-key-cnpj_card, .st-key-delete_card, .st-key-detalhe_empresa_card,
+      .st-key-criar_equipe_card, .st-key-criar_usuario_card {
         background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1rem 1.1rem; height: 100%;
       }
       .detail-card.danger-card, .st-key-delete_card { border-color: rgba(255,107,107,.2); }
@@ -1465,6 +1652,7 @@ st.markdown(
 
 iniciar_banco()
 iniciar_banco_automacao()
+iniciar_banco_usuarios()
 
 exigir_login()
 
@@ -1478,7 +1666,7 @@ if st.session_state.get("navegacao_solicitada"):
 
 # Carregado uma única vez por rerun (cache_data) e reaproveitado nos contadores
 # da sidebar, no cabeçalho e no dashboard, evitando reconsultas redundantes.
-_leads_para_contadores = listar_leads()
+_leads_para_contadores = leads_visiveis()
 _total_leads = len(_leads_para_contadores)
 _campanhas_para_contadores = listar_campanhas()
 _campanhas_ativas = sum(1 for c in _campanhas_para_contadores if c.get("ativa"))
@@ -1503,6 +1691,8 @@ with st.sidebar:
         st.rerun()
 
     st.markdown('<div class="sidebar-caption">Workspace</div>', unsafe_allow_html=True)
+    _nivel_atual = st.session_state.get("nivel_usuario", "vendedor")
+    _paginas_do_nivel = paginas_visiveis(_nivel_atual)
     contadores_nav = {
         "Visão geral": None,
         "Pipeline": None,
@@ -1510,18 +1700,26 @@ with st.sidebar:
         "Empresas": _total_leads,
         "Automação": _campanhas_ativas or None,
         "Nova empresa": None,
+        "Equipe": None,
     }
+    _icones_paginas = {
+        "Visão geral": ":material/dashboard:  Dashboard",
+        "Pipeline": ":material/view_kanban:  Negócios / Pipeline",
+        "Prospecção": ":material/search:  Leads / Prospecção",
+        "Empresas": ":material/business:  Clientes / Empresas",
+        "Automação": ":material/bolt:  Automação",
+        "Nova empresa": ":material/add_business:  Nova empresa",
+        "Equipe": ":material/groups:  Equipe",
+    }
+    # Se o usuário logado mudou de nível (ou é outra sessão) e a página guardada
+    # não está mais liberada pro nível atual, volta pro Dashboard antes de criar
+    # o widget — o Streamlit não aceita um valor fora da lista de opções.
+    if st.session_state.get("navegacao_principal") not in _paginas_do_nivel:
+        st.session_state["navegacao_principal"] = _paginas_do_nivel[0]
     pagina = st.radio(
         "Navegação",
-        ["Visão geral", "Pipeline", "Prospecção", "Empresas", "Automação", "Nova empresa"],
-        format_func=lambda item: {
-            "Visão geral": ":material/dashboard:  Dashboard",
-            "Pipeline": ":material/view_kanban:  Negócios / Pipeline",
-            "Prospecção": ":material/search:  Leads / Prospecção",
-            "Empresas": ":material/business:  Clientes / Empresas",
-            "Automação": ":material/bolt:  Automação",
-            "Nova empresa": ":material/add_business:  Nova empresa",
-        }[item]
+        list(_paginas_do_nivel),
+        format_func=lambda item: _icones_paginas[item]
         + (f"  ·  {contadores_nav[item]}" if contadores_nav[item] else ""),
         label_visibility="collapsed",
         key="navegacao_principal",
@@ -1535,10 +1733,16 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.caption("Scorpions CRM · v1.1")
-    st.caption(f"Logado como {st.session_state.get('usuario_logado', '—')}")
-    if st.button("Sair", use_container_width=True):
-        st.session_state.pop("autenticado", None)
-        st.session_state.pop("usuario_logado", None)
+    st.caption(
+        f"{st.session_state.get('nome_usuario') or st.session_state.get('usuario_logado', '—')} · "
+        f"{rotulo_nivel(_nivel_atual)}"
+    )
+    if st.button("Sair", width="stretch"):
+        for chave in (
+            "autenticado", "usuario_logado", "usuario_id", "nivel_usuario",
+            "equipe_id_usuario", "nome_usuario", "navegacao_principal",
+        ):
+            st.session_state.pop(chave, None)
         st.rerun()
 
 _TITULOS_PAGINA = {
@@ -1548,6 +1752,7 @@ _TITULOS_PAGINA = {
     "Empresas": (f"Clientes", f"{_total_leads} registros", "Base cadastral, consulta CNPJ e exclusão segura."),
     "Automação": ("Automação", "Worker ativo" if worker_online else "Worker offline", "Campanhas agendadas, motor contínuo e histórico."),
     "Nova empresa": ("Nova empresa", "Cadastro manual", "Campos obrigatórios validados antes de salvar."),
+    "Equipe": ("Equipe", rotulo_nivel(_nivel_atual), "Contas, status e distribuição de carteira."),
 }
 _titulo_pagina, _badge_pagina, _subtitulo_pagina = _TITULOS_PAGINA[pagina]
 
@@ -1580,6 +1785,7 @@ aba_cnpj = pagina == "Empresas"
 aba_automacao = pagina == "Automação"
 aba_base = pagina == "Empresas"
 aba_manual = pagina == "Nova empresa"
+aba_equipe = pagina == "Equipe"
 
 if aba_dashboard:
     dados = _leads_para_contadores
@@ -1915,7 +2121,7 @@ if aba_dashboard:
 
 if aba_funil:
     st.subheader("Pipeline comercial")
-    dados_funil = listar_leads()
+    dados_funil = leads_visiveis()
     etapas_kanban = [etapa for etapa in STATUS if etapa not in ("Fechado / Contrato", "Descartado")]
     cols = st.columns(len(etapas_kanban))
 
@@ -2137,6 +2343,7 @@ def _confirmar_exclusao_campanha(campanha_id: int, nome: str) -> None:
 
 
 if aba_automacao:
+    _pode_gerenciar_campanhas = bool(pode(st.session_state.get("nivel_usuario"), "pode_gerenciar_campanhas"))
     estado_worker = status_worker()
     _worker_dot_style = "" if estado_worker["online"] else "background:var(--weak);animation:none;"
     _worker_texto = (
@@ -2181,41 +2388,44 @@ if aba_automacao:
                     sugestao = PERFIS_ICP[perfil_escolhido]["consulta_sugerida"]
                     st.info(f"**Sugestão de busca para o nicho:** `{sugestao}`")
 
-        with st.expander("Criar nova campanha", expanded=not bool(listar_campanhas())):
-            with st.form("nova_campanha", clear_on_submit=True):
-                c1, c2 = st.columns(2)
-                nome_campanha = c1.text_input("Nome da campanha", placeholder="Clínicas de Campinas")
-                fonte_campanha = c2.selectbox("Fonte", FONTES_AUTOMACAO)
-                nicho_campanha = c1.text_input(
-                    "Nicho ou segmento",
-                    placeholder="Ex.: Todos ou cooperativa de crédito",
-                    max_chars=120,
-                )
-                local_campanha = c2.text_input(
-                    "Município, UF",
-                    placeholder="Campinas, SP",
-                    max_chars=120,
-                )
-                limite_campanha = c1.number_input("Leads por execução", min_value=1, max_value=100, value=8)
-                horario_campanha = c2.time_input("Horário diário", value=datetime.strptime("08:00", "%H:%M").time())
-                _sugerir_nicho_campanha()
-                ativa_campanha = st.checkbox("Ativar imediatamente", value=True)
-                criar = st.form_submit_button("Criar campanha", type="primary", width="stretch")
-            if criar:
-                try:
-                    campanha_id = criar_campanha(
-                        nome_campanha,
-                        nicho_campanha,
-                        local_campanha,
-                        fonte_campanha,
-                        int(limite_campanha),
-                        horario_campanha.strftime("%H:%M"),
-                        ativa_campanha,
+        if not _pode_gerenciar_campanhas:
+            st.caption("Seu nível tem acesso de leitura às campanhas e ao histórico abaixo.")
+        else:
+            with st.expander("Criar nova campanha", expanded=not bool(listar_campanhas())):
+                with st.form("nova_campanha", clear_on_submit=True):
+                    c1, c2 = st.columns(2)
+                    nome_campanha = c1.text_input("Nome da campanha", placeholder="Clínicas de Campinas")
+                    fonte_campanha = c2.selectbox("Fonte", FONTES_AUTOMACAO)
+                    nicho_campanha = c1.text_input(
+                        "Nicho ou segmento",
+                        placeholder="Ex.: Todos ou cooperativa de crédito",
+                        max_chars=120,
                     )
-                    st.session_state["aviso_automacao"] = f"Campanha #{campanha_id} criada."
-                    st.rerun()
-                except ValueError as erro:
-                    st.error(str(erro))
+                    local_campanha = c2.text_input(
+                        "Município, UF",
+                        placeholder="Campinas, SP",
+                        max_chars=120,
+                    )
+                    limite_campanha = c1.number_input("Leads por execução", min_value=1, max_value=100, value=8)
+                    horario_campanha = c2.time_input("Horário diário", value=datetime.strptime("08:00", "%H:%M").time())
+                    _sugerir_nicho_campanha()
+                    ativa_campanha = st.checkbox("Ativar imediatamente", value=True)
+                    criar = st.form_submit_button("Criar campanha", type="primary", width="stretch")
+                if criar:
+                    try:
+                        campanha_id = criar_campanha(
+                            nome_campanha,
+                            nicho_campanha,
+                            local_campanha,
+                            fonte_campanha,
+                            int(limite_campanha),
+                            horario_campanha.strftime("%H:%M"),
+                            ativa_campanha,
+                        )
+                        st.session_state["aviso_automacao"] = f"Campanha #{campanha_id} criada."
+                        st.rerun()
+                    except ValueError as erro:
+                        st.error(str(erro))
 
         campanhas_atuais = listar_campanhas() # type: ignore
         if campanhas_atuais:
@@ -2243,38 +2453,39 @@ if aba_automacao:
                     )
                     st.markdown('<div style="height:0.6rem"></div>', unsafe_allow_html=True)
 
-            opcoes_campanha = {
-                f"#{campanha['id']} — {campanha['nome']}": campanha["id"] for campanha in campanhas_atuais
-            }
-            campanha_escolhida = st.selectbox("Gerenciar campanha", list(opcoes_campanha))
-            campanha_escolhida_id = opcoes_campanha[campanha_escolhida]
-            campanha_escolhida_nome = next(
-                c["nome"] for c in campanhas_atuais if c["id"] == campanha_escolhida_id
-            )
-            executar_col, alternar_col, excluir_col = st.columns(3)
-            if executar_col.button("Executar agora", type="primary", width="stretch"):
-                with st.spinner("Executando a campanha..."):
-                    resultado_execucao = executar_campanha(campanha_escolhida_id)
-                if resultado_execucao["status"] == "Sucesso":
-                    st.success(resultado_execucao["mensagem"])
-                elif resultado_execucao["status"] == "Ignorada":
-                    st.info(resultado_execucao["mensagem"])
-                else:
-                    st.error(resultado_execucao["mensagem"])
-            if alternar_col.button("Ativar/pausar", width="stretch"):
-                ativa_nova = alternar_campanha(campanha_escolhida_id)
-                st.session_state["aviso_automacao"] = "Campanha ativada." if ativa_nova else "Campanha pausada."
-                st.rerun()
-            if excluir_col.button("Excluir campanha", width="stretch"):
-                st.session_state["confirmar_exclusao_campanha_id"] = campanha_escolhida_id
-                st.session_state["confirmar_exclusao_campanha_nome"] = campanha_escolhida_nome
-                st.rerun()
-
-            _campanha_id_para_excluir = st.session_state.get("confirmar_exclusao_campanha_id")
-            if _campanha_id_para_excluir:
-                _confirmar_exclusao_campanha(
-                    int(_campanha_id_para_excluir), st.session_state.get("confirmar_exclusao_campanha_nome", "")
+            if _pode_gerenciar_campanhas:
+                opcoes_campanha = {
+                    f"#{campanha['id']} — {campanha['nome']}": campanha["id"] for campanha in campanhas_atuais
+                }
+                campanha_escolhida = st.selectbox("Gerenciar campanha", list(opcoes_campanha))
+                campanha_escolhida_id = opcoes_campanha[campanha_escolhida]
+                campanha_escolhida_nome = next(
+                    c["nome"] for c in campanhas_atuais if c["id"] == campanha_escolhida_id
                 )
+                executar_col, alternar_col, excluir_col = st.columns(3)
+                if executar_col.button("Executar agora", type="primary", width="stretch"):
+                    with st.spinner("Executando a campanha..."):
+                        resultado_execucao = executar_campanha(campanha_escolhida_id)
+                    if resultado_execucao["status"] == "Sucesso":
+                        st.success(resultado_execucao["mensagem"])
+                    elif resultado_execucao["status"] == "Ignorada":
+                        st.info(resultado_execucao["mensagem"])
+                    else:
+                        st.error(resultado_execucao["mensagem"])
+                if alternar_col.button("Ativar/pausar", width="stretch"):
+                    ativa_nova = alternar_campanha(campanha_escolhida_id)
+                    st.session_state["aviso_automacao"] = "Campanha ativada." if ativa_nova else "Campanha pausada."
+                    st.rerun()
+                if excluir_col.button("Excluir campanha", width="stretch"):
+                    st.session_state["confirmar_exclusao_campanha_id"] = campanha_escolhida_id
+                    st.session_state["confirmar_exclusao_campanha_nome"] = campanha_escolhida_nome
+                    st.rerun()
+
+                _campanha_id_para_excluir = st.session_state.get("confirmar_exclusao_campanha_id")
+                if _campanha_id_para_excluir:
+                    _confirmar_exclusao_campanha(
+                        int(_campanha_id_para_excluir), st.session_state.get("confirmar_exclusao_campanha_nome", "")
+                    )
         else:
             st.info("Nenhuma campanha configurada.")
 
@@ -2306,35 +2517,36 @@ if aba_automacao:
                     sugestao = PERFIS_ICP[perfil_escolhido]["consulta_sugerida"]
                     st.info(f"**Sugestão de busca para o nicho:** `{sugestao}`")
 
-        with st.expander("Adicionar novo alvo contínuo", expanded=not bool(listar_alvos_continuos())):
-            with st.form("novo_alvo_continuo", clear_on_submit=True):
-                c1, c2 = st.columns(2)
-                nome_alvo = c1.text_input("Nome do alvo", placeholder="Clínicas de Campinas")
-                nicho_alvo = c1.text_input(
-                    "Nicho ou segmento",
-                    placeholder="Ex.: cooperativa de crédito",
-                    max_chars=120,
-                )
-                local_alvo = c2.text_input(
-                    "Município, UF",
-                    placeholder="Campinas, SP",
-                    max_chars=120,
-                )
-                _sugerir_nicho_alvo()
-                ativo_alvo = st.checkbox("Ativar imediatamente", value=True)
-                adicionar_alvo = st.form_submit_button("Adicionar alvo", type="primary", width="stretch")
-            if adicionar_alvo:
-                try:
-                    alvo_id = criar_alvo_continuo(
-                        nome_alvo,
-                        nicho_alvo,
-                        local_alvo,
-                        ativo_alvo,
+        if _pode_gerenciar_campanhas:
+            with st.expander("Adicionar novo alvo contínuo", expanded=not bool(listar_alvos_continuos())):
+                with st.form("novo_alvo_continuo", clear_on_submit=True):
+                    c1, c2 = st.columns(2)
+                    nome_alvo = c1.text_input("Nome do alvo", placeholder="Clínicas de Campinas")
+                    nicho_alvo = c1.text_input(
+                        "Nicho ou segmento",
+                        placeholder="Ex.: cooperativa de crédito",
+                        max_chars=120,
                     )
-                    st.session_state["aviso_automacao"] = f"Alvo contínuo #{alvo_id} criado."
-                    st.rerun()
-                except ValueError as erro:
-                    st.error(str(erro))
+                    local_alvo = c2.text_input(
+                        "Município, UF",
+                        placeholder="Campinas, SP",
+                        max_chars=120,
+                    )
+                    _sugerir_nicho_alvo()
+                    ativo_alvo = st.checkbox("Ativar imediatamente", value=True)
+                    adicionar_alvo = st.form_submit_button("Adicionar alvo", type="primary", width="stretch")
+                if adicionar_alvo:
+                    try:
+                        alvo_id = criar_alvo_continuo(
+                            nome_alvo,
+                            nicho_alvo,
+                            local_alvo,
+                            ativo_alvo,
+                        )
+                        st.session_state["aviso_automacao"] = f"Alvo contínuo #{alvo_id} criado."
+                        st.rerun()
+                    except ValueError as erro:
+                        st.error(str(erro))
 
         alvos_atuais = listar_alvos_continuos()
         if alvos_atuais:
@@ -2348,20 +2560,21 @@ if aba_automacao:
                 hide_index=True,
             )
 
-            opcoes_alvo = {
-                f"#{alvo['id']} — {alvo['nome']}": alvo["id"] for alvo in alvos_atuais
-            }
-            alvo_escolhido = st.selectbox("Gerenciar alvo", list(opcoes_alvo))
-            alvo_escolhido_id = opcoes_alvo[alvo_escolhido]
-            alternar_alvo_col, excluir_alvo_col = st.columns(2)
-            if alternar_alvo_col.button("Ativar/pausar alvo", width="stretch", key="alternar_alvo"):
-                ativa = alternar_alvo_continuo(alvo_escolhido_id)
-                st.session_state["aviso_automacao"] = "Alvo ativado." if ativa else "Alvo pausado."
-                st.rerun()
-            if excluir_alvo_col.button("Excluir alvo", width="stretch", key="excluir_alvo"):
-                excluir_alvo_continuo(alvo_escolhido_id)
-                st.session_state["aviso_automacao"] = "Alvo excluído."
-                st.rerun()
+            if _pode_gerenciar_campanhas:
+                opcoes_alvo = {
+                    f"#{alvo['id']} — {alvo['nome']}": alvo["id"] for alvo in alvos_atuais
+                }
+                alvo_escolhido = st.selectbox("Gerenciar alvo", list(opcoes_alvo))
+                alvo_escolhido_id = opcoes_alvo[alvo_escolhido]
+                alternar_alvo_col, excluir_alvo_col = st.columns(2)
+                if alternar_alvo_col.button("Ativar/pausar alvo", width="stretch", key="alternar_alvo"):
+                    ativa = alternar_alvo_continuo(alvo_escolhido_id)
+                    st.session_state["aviso_automacao"] = "Alvo ativado." if ativa else "Alvo pausado."
+                    st.rerun()
+                if excluir_alvo_col.button("Excluir alvo", width="stretch", key="excluir_alvo"):
+                    excluir_alvo_continuo(alvo_escolhido_id)
+                    st.session_state["aviso_automacao"] = "Alvo excluído."
+                    st.rerun()
 
     with tab_extracao_url:
         st.subheader("Extração complementar por URL")
@@ -2436,13 +2649,13 @@ if aba_base:
     if aviso_empresa:
         st.success(aviso_empresa)
 
-    todos = listar_leads()
+    todos = leads_visiveis()
     nichos = ["Todos"] + (sorted(todos["nicho"].dropna().unique().tolist()) if not todos.empty else [])
     f1, f2, f3 = st.columns([2, 1, 1])
     termo = f1.text_input("Pesquisar na base", placeholder="Empresa, cidade ou CNPJ", key="busca_empresas")
     filtro_nicho = f2.selectbox("Filtrar nicho", nichos)
     filtro_status = f3.selectbox("Filtrar status", ["Todos"] + STATUS)
-    base = listar_leads(termo, filtro_nicho, filtro_status)
+    base = leads_visiveis(termo, filtro_nicho, filtro_status)
 
     if base.empty:
         st.markdown(
@@ -2560,7 +2773,8 @@ if aba_base:
         )
 
         st.markdown('<div style="height:0.8rem"></div>', unsafe_allow_html=True)
-        col_cnpj_card, col_delete_card = st.columns(2)
+        _pode_excluir = bool(pode(st.session_state.get("nivel_usuario"), "pode_excluir_leads"))
+        col_cnpj_card, col_delete_card = st.columns(2) if _pode_excluir else (st.container(), None)
         with col_cnpj_card:
             with st.container(key="cnpj_card"):
                 st.markdown(
@@ -2607,24 +2821,25 @@ if aba_base:
                         elif duplicados:
                             st.info("Essa empresa já está cadastrada na base.")
 
-        with col_delete_card:
-            with st.container(key="delete_card"):
-                st.markdown(
-                    '<div class="card-title danger">Excluir registro</div>'
-                    '<p class="card-note">O seletor mostra nome, cidade e etapa — nunca só o ID.</p>',
-                    unsafe_allow_html=True,
-                )
-                rotulo_excluir = st.selectbox(
-                    "Excluir lead", ["Selecione..."] + list(opcoes_empresas.keys()),
-                    key="excluir_lead_select", label_visibility="collapsed",
-                )
-                if rotulo_excluir != "Selecione..." and st.button(
-                    "Excluir", key="abrir_confirmacao_exclusao", use_container_width=True
-                ):
-                    st.session_state["confirmar_exclusao_lead_id"] = opcoes_empresas[rotulo_excluir]
-                    st.rerun()
+        if _pode_excluir:
+            with col_delete_card:
+                with st.container(key="delete_card"):
+                    st.markdown(
+                        '<div class="card-title danger">Excluir registro</div>'
+                        '<p class="card-note">O seletor mostra nome, cidade e etapa — nunca só o ID.</p>',
+                        unsafe_allow_html=True,
+                    )
+                    rotulo_excluir = st.selectbox(
+                        "Excluir lead", ["Selecione..."] + list(opcoes_empresas.keys()),
+                        key="excluir_lead_select", label_visibility="collapsed",
+                    )
+                    if rotulo_excluir != "Selecione..." and st.button(
+                        "Excluir", key="abrir_confirmacao_exclusao", width="stretch"
+                    ):
+                        st.session_state["confirmar_exclusao_lead_id"] = opcoes_empresas[rotulo_excluir]
+                        st.rerun()
 
-        _lead_id_para_excluir = st.session_state.get("confirmar_exclusao_lead_id")
+        _lead_id_para_excluir = st.session_state.get("confirmar_exclusao_lead_id") if _pode_excluir else None
         if _lead_id_para_excluir:
             _linha_alvo = base[base["id"] == _lead_id_para_excluir]
             if _linha_alvo.empty:
@@ -2733,3 +2948,139 @@ if aba_manual:
                 st.rerun()
             else:
                 st.warning("Esse lead já existe na base.")
+
+
+if aba_equipe:
+    _nivel_eq = st.session_state.get("nivel_usuario")
+    _meu_id = st.session_state.get("usuario_id")
+    _minha_equipe = st.session_state.get("equipe_id_usuario")
+
+    aviso_equipe = st.session_state.pop("aviso_equipe", None)
+    if aviso_equipe:
+        st.success(aviso_equipe)
+
+    equipes_existentes = listar_equipes()
+    mapa_equipes = {e["id"]: e["nome"] for e in equipes_existentes}
+
+    if _nivel_eq == "diretor":
+        col_eq_form, col_user_form = st.columns(2)
+        with col_eq_form:
+            with st.container(key="criar_equipe_card"):
+                st.markdown('<div class="card-title">Nova equipe</div>', unsafe_allow_html=True)
+                with st.form("form_nova_equipe", clear_on_submit=True):
+                    nome_equipe = st.text_input("Nome da equipe", placeholder="Equipe Comercial SP")
+                    criar_equipe_clicado = st.form_submit_button("Criar equipe", width="stretch")
+                if criar_equipe_clicado:
+                    if nome_equipe.strip():
+                        try:
+                            criar_equipe(nome_equipe)
+                            st.rerun()
+                        except sqlite3.IntegrityError:
+                            st.warning("Já existe uma equipe com esse nome.")
+                    else:
+                        st.warning("Informe um nome para a equipe.")
+
+        with col_user_form:
+            with st.container(key="criar_usuario_card"):
+                st.markdown('<div class="card-title">Nova conta</div>', unsafe_allow_html=True)
+                with st.form("form_novo_usuario", clear_on_submit=True):
+                    c1, c2 = st.columns(2)
+                    novo_username = c1.text_input("Usuário (login)")
+                    novo_nome = c2.text_input("Nome completo")
+                    nova_senha = c1.text_input("Senha", type="password")
+                    novo_email = c2.text_input("E-mail (opcional)")
+                    novo_nivel = c1.selectbox("Nível", ORDEM_NIVEIS, format_func=rotulo_nivel)
+                    opcoes_equipe_criacao = {"Sem equipe": None, **{v: k for k, v in mapa_equipes.items()}}
+                    nova_equipe_rotulo = c2.selectbox("Equipe", list(opcoes_equipe_criacao))
+                    criar_usuario_clicado = st.form_submit_button(
+                        "Criar usuário", type="primary", width="stretch"
+                    )
+                if criar_usuario_clicado:
+                    try:
+                        criar_usuario(
+                            novo_username, nova_senha, novo_nome, novo_nivel,
+                            opcoes_equipe_criacao[nova_equipe_rotulo], novo_email,
+                        )
+                        st.session_state["aviso_equipe"] = f"Usuário '{novo_username}' criado."
+                        st.rerun()
+                    except ValueError as erro:
+                        st.warning(str(erro))
+                    except sqlite3.IntegrityError:
+                        st.warning("Esse nome de usuário já existe.")
+
+        st.divider()
+
+    st.markdown(
+        '<h3 style="margin:0 0 0.6rem;font-family:Orbitron,sans-serif;font-size:0.85rem;font-weight:600;'
+        'letter-spacing:0.12em;text-transform:uppercase;color:#F5F7FA;">Contas</h3>',
+        unsafe_allow_html=True,
+    )
+    if _nivel_eq == "diretor":
+        usuarios_visiveis = listar_usuarios()
+    elif _nivel_eq == "gerente":
+        usuarios_visiveis = listar_usuarios(niveis=("vendedor", "supervisor"))
+    elif _nivel_eq == "supervisor":
+        usuarios_visiveis = listar_usuarios(equipe_id=_minha_equipe, niveis=("vendedor",))
+    else:
+        usuarios_visiveis = []
+
+    niveis_que_posso_alternar = niveis_administraveis_por(_nivel_eq)
+    if not usuarios_visiveis:
+        st.markdown(
+            '<div class="dashed-empty"><div class="dashed-title">Nenhuma conta por aqui ainda</div>'
+            '<p>Assim que houver usuários no seu escopo, eles aparecem nesta lista.</p></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        for usuario_linha in usuarios_visiveis:
+            ativo = usuario_linha["status"] == "ativo"
+            chip_classe = "chip-accent" if ativo else "chip-neutral"
+            col_info, col_nivel, col_equipe, col_acao = st.columns([2.2, 1.3, 1.3, 1])
+            col_info.markdown(f"**{usuario_linha['nome']}** · @{usuario_linha['username']}")
+            col_nivel.markdown(f'<span class="chip {chip_classe}">{rotulo_nivel(usuario_linha["nivel"])}</span>', unsafe_allow_html=True)
+            col_equipe.caption(usuario_linha.get("equipe_nome") or "Sem equipe")
+            pode_alternar_esta_linha = (
+                usuario_linha["nivel"] in niveis_que_posso_alternar and usuario_linha["id"] != _meu_id
+            )
+            if pode_alternar_esta_linha:
+                rotulo_botao = "Desativar" if ativo else "Ativar"
+                if col_acao.button(rotulo_botao, key=f"toggle_usuario_{usuario_linha['id']}", width="stretch"):
+                    alternar_status_usuario(usuario_linha["id"])
+                    st.rerun()
+            else:
+                col_acao.caption("Ativo" if ativo else "Inativo")
+
+    escopo_atribuicao = pode(_nivel_eq, "escopo_atribuicao_carteira")
+    if escopo_atribuicao:
+        st.divider()
+        st.markdown(
+            '<h3 style="margin:0 0 0.4rem;font-family:Orbitron,sans-serif;font-size:0.85rem;font-weight:600;'
+            'letter-spacing:0.12em;text-transform:uppercase;color:#F5F7FA;">Atribuir carteira</h3>'
+            '<div style="font-size:0.72rem;color:#5A6373;margin-bottom:0.7rem;">'
+            'escolha um lead e o responsável que vai cuidar dele daqui pra frente.</div>',
+            unsafe_allow_html=True,
+        )
+        leads_para_atribuir = leads_visiveis()
+        if escopo_atribuicao == "todas":
+            candidatos_carteira = listar_usuarios(niveis=("vendedor", "supervisor"))
+        else:
+            candidatos_carteira = listar_usuarios(equipe_id=_minha_equipe, niveis=("vendedor",))
+
+        if leads_para_atribuir.empty or not candidatos_carteira:
+            st.caption("Sem leads ou sem contas no seu escopo para reatribuir agora.")
+        else:
+            opcoes_leads_carteira = {
+                f"{linha['nome_empresa']} — #{linha['id']}": int(linha["id"])
+                for _, linha in leads_para_atribuir.iterrows()
+            }
+            opcoes_usuarios_carteira = {"Sem responsável": None, **{u["nome"]: u["id"] for u in candidatos_carteira}}
+            col_lead_carteira, col_user_carteira, col_btn_carteira = st.columns([2, 2, 1])
+            lead_escolhido_rotulo = col_lead_carteira.selectbox("Lead", list(opcoes_leads_carteira))
+            usuario_escolhido_rotulo = col_user_carteira.selectbox("Novo responsável", list(opcoes_usuarios_carteira))
+            if col_btn_carteira.button("Atribuir", width="stretch", key="btn_atribuir_carteira"):
+                atribuir_lead_a_usuario(
+                    opcoes_leads_carteira[lead_escolhido_rotulo],
+                    opcoes_usuarios_carteira[usuario_escolhido_rotulo],
+                )
+                st.session_state["aviso_equipe"] = "Carteira atualizada."
+                st.rerun()

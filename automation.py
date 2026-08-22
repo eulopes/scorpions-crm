@@ -1979,8 +1979,8 @@ def _salvar_leads(leads: list[dict[str, Any]]) -> tuple[int, int]:
                         place_id, cnpj, nome_empresa, razao_social, decisor, nicho,
                         endereco, cidade, telefone, site, email, status, valor_proposta, proximo_contato, status_receita,
                         origem, observacoes, pontuacao, motivo_qualificacao, segmento_icp,
-                        servicos_recomendados, criado_em, atualizado_em
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        servicos_recomendados, responsavel_usuario_id, criado_em, atualizado_em
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         lead.get("place_id"), cnpj_normalizado, lead["nome_empresa"],
@@ -1994,6 +1994,7 @@ def _salvar_leads(leads: list[dict[str, Any]]) -> tuple[int, int]:
                         lead.get("origem", "Automação"), lead.get("observacoes", ""),
                         lead.get("pontuacao"), lead.get("motivo_qualificacao", ""),
                         lead.get("segmento_icp"), lead.get("servicos_recomendados"),
+                        lead.get("responsavel_usuario_id"),
                         agora, agora,
                     ),
                 )
