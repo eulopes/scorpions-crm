@@ -1011,6 +1011,25 @@ st.markdown(
                 0% { box-shadow: 0 0 0 0 rgba(125, 211, 252, .5); }
                 100% { box-shadow: 0 0 0 7px rgba(125, 211, 252, 0); }
             }
+            @keyframes scorp-trace {
+                0% { transform: translateX(-100%); }
+                100% { transform: translateX(300%); }
+            }
+            .trace-line {
+                position: relative;
+                height: 1px;
+                overflow: hidden;
+                background: var(--line);
+                margin-bottom: 0.9rem;
+            }
+            .trace-line::after {
+                content: "";
+                position: absolute;
+                top: 0; left: 0;
+                width: 40%; height: 1px;
+                background: linear-gradient(90deg, transparent, var(--secondary), var(--primary));
+                animation: scorp-trace 4s linear infinite;
+            }
 
             [data-testid="stSidebar"] [data-testid="stTextInput"] input {
                 background: var(--panel);
@@ -1465,7 +1484,7 @@ _campanhas_para_contadores = listar_campanhas()
 _campanhas_ativas = sum(1 for c in _campanhas_para_contadores if c.get("ativa"))
 
 with st.sidebar:
-    st.image("assets/scorpions-hybrid-mark.svg", width=48)
+    st.image("assets/scorpions-logo-mark.png", width=48)
     st.markdown(
         '<div class="brand-lockup"><strong>SCORPIONS</strong><span>Soluções tecnológicas</span></div>',
         unsafe_allow_html=True,
@@ -1967,6 +1986,7 @@ if aba_prospeccao:
                 st.info(f"**Sugestão de busca para o nicho:** `{sugestao}`")
 
     st.subheader("Prospecção")
+    st.markdown('<div class="trace-line"></div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns([2, 2, 1])
     nicho_busca = c1.text_input(
         "Nicho ou segmento",
