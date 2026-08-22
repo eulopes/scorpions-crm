@@ -817,10 +817,20 @@ def _render_kanban_card(lead: pd.Series, etapa_atual: str) -> None:
             proximo_contato_str = None
 
     score = lead.get('pontuacao')
-    score_str = f"Score: {int(score)}" if score and pd.notna(score) else "Score: N/A"
+    score_num = int(score) if score and pd.notna(score) else None
+    if score_num is None:
+        score_classe, score_str = "score-lo", "N/A"
+    elif score_num >= 85:
+        score_classe, score_str = "score-hi", str(score_num)
+    elif score_num >= 70:
+        score_classe, score_str = "score-mid", str(score_num)
+    else:
+        score_classe, score_str = "score-lo", str(score_num)
+
     valor_proposta = lead.get('valor_proposta') or 0.0
     icp_bruto = lead.get('segmento_icp')
-    icp = icp_bruto if icp_bruto and pd.notna(icp_bruto) else 'N/A'
+    icp = icp_bruto if icp_bruto and pd.notna(icp_bruto) else 'Não classificado'
+    icp_classe = "chip-neutral" if icp == "Não classificado" else "chip-accent"
 
     with st.container():
         st.markdown(
@@ -828,12 +838,14 @@ def _render_kanban_card(lead: pd.Series, etapa_atual: str) -> None:
             <div class="kanban-card">
               <div class="kanban-topline">
                 <div class="kanban-company">{lead['nome_empresa']}</div>
-                <div class="soft-badge">{score_str}</div>
+                <div class="score-badge {score_classe}">{score_str}</div>
               </div>
-              <div class="kanban-meta kanban-contatos">{contatos_disponiveis}{alerta_contato}</div>
               <div class="kanban-meta">{lead.get('cidade') or 'N/A'}</div>
-              <div class="kanban-meta">ICP: {icp}</div>
-              {f'<div class="kanban-meta">Valor: R$ {valor_proposta:,.2f}</div>' if valor_proposta > 0 else ''}
+              <div class="kanban-meta kanban-contatos">{contatos_disponiveis}{alerta_contato}</div>
+              <div style="margin-top:0.4rem; display:flex; align-items:center; gap:0.5rem;">
+                <span class="chip {icp_classe}">{icp}</span>
+                {f'<span style="margin-left:auto;font-family:Orbitron,sans-serif;font-size:0.72rem;color:#7DD3FC;">R$ {valor_proposta:,.0f}</span>' if valor_proposta > 0 else ''}
+              </div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -850,16 +862,23 @@ def _render_kanban_card(lead: pd.Series, etapa_atual: str) -> None:
                 texto_contato = f"~~{data_fmt}~~ (Atrasado)" if alerta_contato else data_fmt
                 st.caption(f"**Próximo Contato:** {texto_contato}")
 
-        nova_etapa = st.selectbox(
-            "Mover para",
-            options=STATUS,
-            index=STATUS.index(etapa_atual),
-            key=f"move_{lead['id']}",
-            label_visibility="collapsed",
-        )
-        if nova_etapa != etapa_atual:
-            atualizar_etapa_funil(int(lead["id"]), nova_etapa)
-            st.cache_data.clear()
+        col_mover, col_abrir = st.columns([3, 1])
+        with col_mover:
+            nova_etapa = st.selectbox(
+                "Mover para",
+                options=STATUS,
+                index=STATUS.index(etapa_atual),
+                key=f"move_{lead['id']}",
+                label_visibility="collapsed",
+            )
+            if nova_etapa != etapa_atual:
+                atualizar_etapa_funil(int(lead["id"]), nova_etapa)
+                st.cache_data.clear()
+        with col_abrir:
+            if st.button("Abrir", key=f"abrir_{lead['id']}", use_container_width=True):
+                st.session_state["busca_empresas"] = lead["nome_empresa"]
+                st.session_state["navegacao_solicitada"] = "Empresas"
+                st.rerun()
 
 st.set_page_config(page_title="Scorpions CRM", page_icon=":material/monitoring:", layout="wide")
 google_places_configurado = configurar_google_places()
@@ -867,28 +886,37 @@ google_places_configurado = configurar_google_places()
 st.markdown(
     """
     <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;600;700&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;600;700;800&display=swap');
 
       :root {
-                --bg: #050608;
-                --panel: #111721;
-                --panel-strong: #0a0d12;
-                --line: rgba(112, 211, 252, 0.22);
-                --text: #f5f7fa;
-                --muted: #8a94a6;
-                --primary: #70d3fc;
-                --secondary: #2568ff;
-                --accent: #006efd;
-                --success: #70d3fc;
-                --warning: #caa86a;
+                --bg: #0A0A0F;
+                --panel: #111319;
+                --panel-strong: #0C0E13;
+                --line: #1E232B;
+                --line-strong: #2D333D;
+                --text: #F5F7FA;
+                --text-secondary: #C3CBD8;
+                --muted: #8A94A6;
+                --weak: #5A6373;
+                --primary: #7DD3FC;
+                --secondary: #2568FF;
+                --accent: #0D6EFD;
+                --danger: #ff8f8f;
+                --danger-strong: #ffb3b3;
+                --success: #7DD3FC;
+                --warning: #ff8f8f;
       }
+
+      html, body, .stApp, [class*="css"] { font-family: Inter, system-ui, sans-serif; }
 
       .stApp {
                 background:
-                    radial-gradient(circle at 75% 10%, rgba(37, 104, 255, 0.12), transparent 32%),
+                    radial-gradient(circle at 78% 0%, rgba(37, 104, 255, 0.10), transparent 42%),
                     var(--bg);
         color: var(--text);
       }
+
+      :focus-visible { outline: 1px solid var(--primary) !important; outline-offset: 2px !important; }
 
             .stApp::before {
                 content: "";
@@ -915,45 +943,86 @@ st.markdown(
       }
 
             [data-testid="stSidebar"] {
-                background: #080a0e;
+                background: var(--bg);
                 border-right: 1px solid var(--line);
             }
 
             [data-testid="stSidebar"] .block-container {
-                padding: 1.5rem 1rem;
+                padding: 1.25rem 1rem 1.5rem;
+            }
+
+            [data-testid="stSidebar"] img {
+                border: 1px solid var(--line);
+                border-radius: 8px;
+                filter: brightness(1.35) contrast(1.1);
             }
 
             .brand-lockup {
-                padding: 0.35rem 0.5rem 1.5rem;
+                padding: 0.35rem 0.5rem 1.1rem;
                 border-bottom: 1px solid var(--line);
-                margin-bottom: 1.2rem;
+                margin-bottom: 0.9rem;
             }
 
             .brand-lockup strong {
                 display: block;
                 color: var(--text);
                 font-family: Orbitron, Inter, sans-serif;
-                font-size: 1rem;
-                letter-spacing: 0.32em;
+                font-weight: 700;
+                font-size: 0.95rem;
+                letter-spacing: 0.22em;
             }
 
             .brand-lockup span {
-                color: var(--muted);
-                font-size: 0.72rem;
+                color: var(--primary);
+                font-size: 0.6rem;
+                letter-spacing: 0.18em;
+                text-transform: uppercase;
             }
 
             .sidebar-caption {
-                color: var(--muted);
-                font-size: 0.68rem;
-                letter-spacing: 0.1em;
+                color: var(--weak);
+                font-size: 0.65rem;
+                letter-spacing: 0.2em;
                 text-transform: uppercase;
-                margin: 1.25rem 0 0.45rem;
+                margin: 1.1rem 0 0.4rem;
+                padding: 0 0.5rem;
             }
 
-      .header-shell {
+            .sidebar-status {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                color: var(--muted);
+                font-size: 0.72rem;
+                padding: 0 0.5rem;
+                margin-bottom: 0.6rem;
+            }
+
+            .sidebar-status .dot {
+                width: 6px;
+                height: 6px;
+                border-radius: 50%;
+                background: var(--primary);
+                flex: none;
+                animation: scorp-pulse 2.2s infinite;
+            }
+
+            @keyframes scorp-pulse {
+                0% { box-shadow: 0 0 0 0 rgba(125, 211, 252, .5); }
+                100% { box-shadow: 0 0 0 7px rgba(125, 211, 252, 0); }
+            }
+
+            [data-testid="stSidebar"] [data-testid="stTextInput"] input {
+                background: var(--panel);
+                border-color: rgba(125, 211, 252, .18);
+                font-size: 0.8rem;
+            }
+
+      .header-shell, .st-key-header_shell {
                 position: relative;
                 z-index: 1;
-                background: rgba(17, 23, 33, 0.92);
+                background: rgba(17, 19, 25, 0.86);
+                backdrop-filter: blur(10px);
         border: 1px solid var(--line);
                 border-radius: 4px;
         padding: 1.25rem 1.35rem 1rem 1.35rem;
@@ -961,163 +1030,199 @@ st.markdown(
         box-shadow: 0 16px 38px rgba(0, 0, 0, 0.24);
       }
 
+      .st-key-header_shell .stButton > button { padding: 0.5rem 0.9rem; font-size: 0.8rem; margin-top: 0.6rem; }
+
       .sales-summary {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 0.9rem;
+        gap: 0.7rem;
         margin: 0 0 1.2rem 0;
       }
 
       .sales-summary__item {
-                background: rgba(17, 23, 33, 0.88);
+                position: relative;
+                overflow: hidden;
+                background: linear-gradient(180deg, var(--panel), var(--panel-strong));
         border: 1px solid var(--line);
                 border-radius: 4px;
         padding: 0.9rem 1rem;
         min-height: 94px;
+                transition: border-color 0.2s ease;
+      }
+
+      .sales-summary__item::before {
+                content: "";
+                position: absolute;
+                top: 0; left: 0; right: 0;
+                height: 1px;
+                background: linear-gradient(90deg, transparent, rgba(125, 211, 252, .45), transparent);
       }
 
       .sales-summary__item.accent {
-                background: linear-gradient(135deg, rgba(0, 110, 253, 0.2), rgba(112, 211, 252, 0.06));
-                border-color: rgba(112, 211, 252, 0.42);
+                border-color: rgba(125, 211, 252, .3);
       }
 
       .sales-summary__item .label {
         display: block;
-        color: var(--muted);
-        font-size: 0.72rem;
+        color: var(--weak);
+        font-size: 0.68rem;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.14em;
       }
 
       .sales-summary__item strong {
         display: block;
-        margin-top: 0.55rem;
-        font-size: 1.7rem;
+        margin-top: 0.5rem;
+        font-family: Orbitron, Inter, sans-serif;
+        font-weight: 600;
+        font-size: 1.55rem;
         line-height: 1.2;
         color: var(--text);
+        letter-spacing: 0.01em;
+      }
+
+      .sales-summary__item .note {
+        display: block;
+        margin-top: 0.2rem;
+        font-size: 0.72rem;
+        color: var(--muted);
       }
 
       .title-badge {
         display: inline-block;
-                background: rgba(37, 104, 255, 0.1);
+                background: transparent;
                 color: var(--primary);
-        border: 1px solid var(--line);
-                border-radius: 2px;
-        font-size: 0.72rem;
+        border: 1px solid rgba(125, 211, 252, .28);
+                border-radius: 3px;
+        font-size: 0.65rem;
         font-weight: 700;
-        letter-spacing: 0.12em;
+        letter-spacing: 0.1em;
         text-transform: uppercase;
-        padding: 0.35rem 0.7rem;
+        padding: 0.2rem 0.55rem;
       }
 
-      .header-shell h1 {
+      .header-shell h1, .st-key-header_shell h1 {
         margin: 0.7rem 0 0.2rem 0;
-        font-size: 2.2rem;
+        font-family: Orbitron, Inter, sans-serif;
+        font-weight: 600;
+        font-size: 1.7rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
         line-height: 1.1;
       }
 
-      .header-shell p {
+      .header-shell p, .st-key-header_shell p {
         margin: 0;
         color: var(--muted);
-        font-size: 1rem;
+        font-size: 0.92rem;
       }
 
       .status-pill {
         display: inline-flex;
         align-items: center;
         gap: 0.4rem;
-        background: rgba(119, 184, 146, 0.1);
-        border: 1px solid rgba(119, 184, 146, 0.3);
-        color: var(--success);
+        background: transparent;
+        border: 1px solid rgba(125, 211, 252, .28);
+        color: var(--primary);
         border-radius: 999px;
-        padding: 0.38rem 0.7rem;
+        padding: 0.32rem 0.7rem;
         font-weight: 600;
-        font-size: 0.75rem;
+        font-size: 0.72rem;
+        letter-spacing: 0.04em;
       }
 
       .status-pill::before {
         content: "";
-        width: 8px;
-        height: 8px;
+        width: 6px;
+        height: 6px;
         border-radius: 50%;
-        background: var(--success);
+        background: var(--primary);
         display: inline-block;
+        animation: scorp-pulse 2.2s infinite;
       }
 
       div[data-testid="stMetricContainer"] {
         background: var(--panel);
         border: 1px solid var(--line);
-        border-radius: 10px;
+        border-radius: 4px;
         padding: 0.85rem 1rem;
-        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.25);
       }
 
       .stDataFrame, .stTable {
         border: 1px solid var(--line);
-        border-radius: 16px;
+        border-radius: 4px;
         overflow: hidden;
       }
 
       .stButton > button {
                 border-radius: 4px;
-                border: 1px solid rgba(112, 211, 252, 0.4);
-                background: rgba(37, 104, 255, 0.12);
+                border: 1px solid var(--line-strong);
+                background: transparent;
                 color: var(--text);
-        font-weight: 700;
-        transition: transform 0.2s ease;
+        font-weight: 600;
+        font-size: 0.82rem;
+        transition: border-color 0.15s ease, background 0.15s ease;
       }
 
       .stButton > button:hover {
-                transform: translateY(-1px);
                 border-color: var(--primary);
-                background: rgba(37, 104, 255, 0.24);
-                box-shadow: 0 0 25px rgba(37, 104, 255, 0.18);
+                background: rgba(37, 104, 255, 0.14);
+                color: var(--text);
       }
 
       .stButton > button[kind="primary"],
       .stButton > button[data-testid="stBaseButton-primary"] {
-                border: none;
+                border: 1px solid rgba(125, 211, 252, .45);
                 background: linear-gradient(90deg, var(--accent), var(--secondary));
                 color: #fff;
+                box-shadow: 0 0 22px rgba(37, 104, 255, .28);
       }
       .stButton > button[kind="primary"]:hover,
       .stButton > button[data-testid="stBaseButton-primary"]:hover {
-                background: linear-gradient(90deg, var(--secondary), var(--primary));
-                box-shadow: 0 0 28px rgba(0, 110, 253, 0.32);
+                filter: brightness(1.12);
+                box-shadow: 0 0 28px rgba(37, 104, 255, .38);
       }
 
       .stTextInput > div > div > input,
       .stNumberInput > div > div > input,
+      .stDateInput > div > div > input,
+      .stTimeInput > div > div > input,
       .stSelectbox > div > div > div,
       .stSelectbox > div > div > div > div,
       .stTextArea > div > div > textarea {
-        background: var(--panel-strong);
+        background: var(--bg);
         color: var(--text);
-        border: 1px solid var(--line);
-        border-radius: 10px;
+        border: 1px solid var(--line-strong);
+        border-radius: 3px;
+        font-size: 0.82rem;
       }
 
       .stAlert {
-        border-radius: 12px;
+        border-radius: 4px;
       }
 
       .soft-badge {
+                font-family: Orbitron, Inter, sans-serif;
                 background: rgba(37, 104, 255, 0.12);
-                border: 1px solid rgba(112, 211, 252, 0.34);
+                border: 1px solid rgba(125, 211, 252, 0.35);
                 color: var(--primary);
-                border-radius: 2px;
-        padding: 0.28rem 0.55rem;
-        font-size: 0.72rem;
+                border-radius: 3px;
+        padding: 0.15rem 0.5rem;
+        font-size: 0.68rem;
         font-weight: 600;
       }
 
       .kanban-card {
-                background: rgba(17, 23, 33, 0.9);
+                background: var(--panel);
                 border: 1px solid var(--line);
                 border-radius: 4px;
         padding: 0.9rem 0.9rem 0.7rem;
         margin-bottom: 0.8rem;
-        box-shadow: 0 8px 16px rgba(2, 6, 23, 0.22);
+                transition: border-color .15s ease, box-shadow .15s ease;
+      }
+      .kanban-card:hover {
+                border-color: rgba(125, 211, 252, .4);
+                box-shadow: 0 0 20px rgba(37, 104, 255, .12);
       }
 
       .kanban-topline {
@@ -1129,14 +1234,15 @@ st.markdown(
       }
 
       .kanban-company {
-        font-weight: 700;
-        font-size: 1rem;
+        font-weight: 600;
+        font-size: 0.92rem;
+        line-height: 1.3;
         color: var(--text);
       }
 
       .kanban-meta {
         color: var(--muted);
-        font-size: 0.8rem;
+        font-size: 0.76rem;
         margin-top: 0.25rem;
       }
 
@@ -1154,8 +1260,8 @@ st.markdown(
         margin-top: 2rem;
         padding-top: 1rem;
         border-top: 1px solid var(--line);
-        color: var(--muted);
-        font-size: 0.8rem;
+        color: var(--weak);
+        font-size: 0.76rem;
         display: flex;
         justify-content: space-between;
         gap: 1rem;
@@ -1163,37 +1269,34 @@ st.markdown(
       }
 
       ::-webkit-scrollbar { width: 10px; height: 10px; }
-      ::-webkit-scrollbar-track { background: var(--panel-strong); }
+      ::-webkit-scrollbar-track { background: var(--bg); }
       ::-webkit-scrollbar-thumb {
-        background: rgba(112, 211, 252, 0.25);
+        background: var(--line-strong);
         border-radius: 999px;
       }
-      ::-webkit-scrollbar-thumb:hover { background: rgba(112, 211, 252, 0.45); }
-
-      .sales-summary__item, .kanban-card {
-        transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-      }
-      .sales-summary__item:hover, .kanban-card:hover {
-        transform: translateY(-2px);
-        border-color: var(--primary);
-        box-shadow: 0 14px 32px rgba(0, 110, 253, 0.16);
-      }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(125, 211, 252, 0.45); }
 
       [data-testid="stSidebar"] [role="radiogroup"] {
-        gap: 0.3rem;
+        gap: 1px;
       }
       [data-testid="stSidebar"] [role="radiogroup"] label {
-        border-radius: 6px;
+        border-radius: 0 3px 3px 0;
+        border-left: 2px solid transparent;
         padding: 0.5rem 0.6rem;
+        color: var(--muted);
+        font-size: 0.82rem;
         transition: background 0.15s ease, color 0.15s ease;
       }
       [data-testid="stSidebar"] [role="radiogroup"] label:hover {
-        background: rgba(37, 104, 255, 0.1);
+        background: var(--panel);
+        color: var(--text);
       }
       [data-testid="stSidebar"] [role="radiogroup"] label[data-checked="true"],
       [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
-        background: linear-gradient(90deg, rgba(0, 110, 253, 0.22), rgba(112, 211, 252, 0.05));
-        border-left: 2px solid var(--primary);
+        background: rgba(37, 104, 255, 0.12);
+        border-left-color: var(--primary);
+        color: var(--text);
+        font-weight: 600;
       }
       [data-testid="stSidebar"] [role="radiogroup"] label > div:first-child {
         display: none;
@@ -1206,6 +1309,7 @@ st.markdown(
       .stTabs [data-baseweb="tab"] {
         color: var(--muted);
         font-weight: 600;
+        font-size: 0.85rem;
       }
       .stTabs [aria-selected="true"] {
         color: var(--text) !important;
@@ -1213,6 +1317,127 @@ st.markdown(
       .stTabs [data-baseweb="tab-highlight"] {
         background: linear-gradient(90deg, var(--accent), var(--primary)) !important;
         height: 2px;
+      }
+
+      /* --- Chips --- */
+      .chip {
+        display: inline-block;
+        font-size: 0.62rem;
+        letter-spacing: 0.06em;
+        padding: 0.12rem 0.5rem;
+        border-radius: 3px;
+        white-space: nowrap;
+      }
+      .chip-accent { color: var(--primary); border: 1px solid rgba(125,211,252,.28); background: rgba(37,104,255,.1); }
+      .chip-neutral { color: var(--muted); border: 1px solid var(--line-strong); background: transparent; }
+      .chip-alert { color: var(--danger); border: 1px solid rgba(255,107,107,.35); background: rgba(255,107,107,.08); }
+
+      /* --- Score badge --- */
+      .score-badge {
+        font-family: Orbitron, Inter, sans-serif;
+        font-size: 0.68rem;
+        padding: 0.12rem 0.5rem;
+        border-radius: 3px;
+        flex: none;
+      }
+      .score-hi { color: var(--primary); border: 1px solid rgba(125,211,252,.35); background: rgba(37,104,255,.12); }
+      .score-mid { color: var(--text-secondary); border: 1px solid var(--line-strong); background: var(--bg); }
+      .score-lo { color: var(--muted); border: 1px solid var(--line-strong); background: var(--bg); }
+
+      /* --- Funil / stage bars (dashboard) --- */
+      .funnel-row { margin-bottom: 0.9rem; }
+      .funnel-row:last-child { margin-bottom: 0; }
+      .funnel-row .funnel-top {
+        display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--muted);
+      }
+      .funnel-row .funnel-top .val { color: var(--text); }
+      .funnel-row .funnel-top .sep { color: var(--weak); }
+      .funnel-track {
+        height: 6px; background: var(--line); border-radius: 999px; margin-top: 0.45rem; overflow: hidden;
+      }
+      .funnel-fill {
+        height: 6px; border-radius: 999px;
+        background: linear-gradient(90deg, var(--accent), var(--primary));
+        box-shadow: 0 0 10px rgba(37, 104, 255, .5);
+      }
+
+      /* --- ICP rows --- */
+      .icp-row {
+        display: flex; align-items: center; gap: 0.6rem; font-size: 0.8rem;
+        padding: 0.3rem 0; color: var(--text);
+      }
+      .icp-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .icp-row .leads { font-size: 0.72rem; color: var(--muted); }
+
+      .icp-alert {
+        margin-top: 1rem;
+        background: rgba(37, 104, 255, .06);
+        border: 1px solid rgba(125, 211, 252, .22);
+        border-left: 2px solid var(--primary);
+        border-radius: 3px;
+        padding: 0.75rem 0.9rem;
+      }
+      .icp-alert .icp-alert-title { font-size: 0.8rem; font-weight: 600; color: var(--primary); }
+      .icp-alert p { font-size: 0.74rem; color: var(--muted); margin: 0.3rem 0 0.6rem; line-height: 1.6; }
+
+      /* --- Attention cards --- */
+      .attn-card {
+        background: var(--panel-strong); border: 1px solid var(--line); border-radius: 4px;
+        padding: 0.8rem 0.9rem; height: 100%; transition: border-color .15s ease;
+      }
+      .attn-card:hover { border-color: rgba(125,211,252,.3); }
+      .attn-kicker { font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; }
+      .attn-title { font-size: 0.86rem; font-weight: 600; margin-top: 0.35rem; color: var(--text); }
+      .attn-note { font-size: 0.74rem; color: var(--muted); margin-top: 0.2rem; line-height: 1.5; }
+
+      /* --- Dashed empty state --- */
+      .dashed-empty {
+        border: 1px dashed var(--line-strong); border-radius: 4px; padding: 1.6rem 1.2rem;
+      }
+      .dashed-empty .dashed-title {
+        font-family: Orbitron, Inter, sans-serif; font-size: 0.78rem; font-weight: 600;
+        letter-spacing: 0.1em; text-transform: uppercase; color: var(--text);
+      }
+      .dashed-empty p { font-size: 0.78rem; color: var(--muted); margin: 0.4rem 0 0; line-height: 1.6; }
+
+      /* --- Source chips row (prospecção) --- */
+      .source-chip-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0 0.2rem; }
+
+      /* --- Campaign cards (automação) --- */
+      .campaign-card {
+        background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 0.9rem 1rem;
+        transition: border-color .15s ease;
+      }
+      .campaign-card:hover { border-color: rgba(125,211,252,.3); }
+      .campaign-card .head { display: flex; align-items: center; gap: 0.5rem; }
+      .campaign-card .head .name { font-size: 0.88rem; font-weight: 600; flex: 1; min-width: 0; }
+      .campaign-card .scope { font-size: 0.74rem; color: var(--muted); margin-top: 0.3rem; }
+      .campaign-card .metrics {
+        display: flex; gap: 1.1rem; margin-top: 0.8rem; padding-top: 0.7rem; border-top: 1px solid var(--line);
+      }
+      .campaign-card .metrics .m-label { font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--weak); }
+      .campaign-card .metrics .m-val { font-family: Orbitron, Inter, sans-serif; font-size: 0.9rem; margin-top: 0.15rem; color: var(--text); }
+
+      /* --- Detail cards grid (empresas) --- */
+      .detail-card, .st-key-cnpj_card, .st-key-delete_card, .st-key-detalhe_empresa_card {
+        background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1rem 1.1rem; height: 100%;
+      }
+      .detail-card.danger-card, .st-key-delete_card { border-color: rgba(255,107,107,.2); }
+      .detail-card h4, .card-title {
+        margin: 0; font-family: Orbitron, Inter, sans-serif; font-size: 0.76rem; font-weight: 600;
+        letter-spacing: 0.1em; text-transform: uppercase; color: var(--text);
+      }
+      .detail-card.danger-card h4, .card-title.danger { color: var(--danger); }
+      .detail-card p, .card-note { font-size: 0.74rem; color: var(--muted); margin: 0.4rem 0 0.7rem; }
+
+      .detail-label { font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--weak); }
+      .detail-value { font-size: 0.82rem; margin-top: 0.15rem; color: var(--text-secondary); }
+
+      /* --- Streamlit dialog (delete confirmation) --- */
+      div[data-testid="stDialog"] div[role="dialog"] {
+        background: var(--panel);
+        border: 1px solid rgba(255, 107, 107, .3);
+        border-radius: 4px;
       }
     </style>
     """,
@@ -1224,13 +1449,49 @@ iniciar_banco_automacao()
 
 exigir_login()
 
+# Botões fora da sidebar (header, cards do kanban etc.) não podem escrever
+# direto em st.session_state["navegacao_principal"]: o widget do rádio já foi
+# instanciado na hora em que eles rodam, e o Streamlit proíbe alterar o estado
+# de um widget depois de criado. Por isso eles gravam em "navegacao_solicitada"
+# e é resolvido aqui, sempre antes do rádio ser criado.
+if st.session_state.get("navegacao_solicitada"):
+    st.session_state["navegacao_principal"] = st.session_state.pop("navegacao_solicitada")
+
+# Carregado uma única vez por rerun (cache_data) e reaproveitado nos contadores
+# da sidebar, no cabeçalho e no dashboard, evitando reconsultas redundantes.
+_leads_para_contadores = listar_leads()
+_total_leads = len(_leads_para_contadores)
+_campanhas_para_contadores = listar_campanhas()
+_campanhas_ativas = sum(1 for c in _campanhas_para_contadores if c.get("ativa"))
+
 with st.sidebar:
     st.image("assets/scorpions-hybrid-mark.svg", width=48)
     st.markdown(
         '<div class="brand-lockup"><strong>SCORPIONS</strong><span>Soluções tecnológicas</span></div>',
         unsafe_allow_html=True,
     )
+
+    busca_global = st.text_input(
+        "Buscar empresa, CNPJ…",
+        key="busca_global",
+        placeholder="Buscar empresa, CNPJ…",
+        label_visibility="collapsed",
+    )
+    if busca_global and busca_global != st.session_state.get("_busca_global_aplicada"):
+        st.session_state["_busca_global_aplicada"] = busca_global
+        st.session_state["busca_empresas"] = busca_global
+        st.session_state["navegacao_principal"] = "Empresas"
+        st.rerun()
+
     st.markdown('<div class="sidebar-caption">Workspace</div>', unsafe_allow_html=True)
+    contadores_nav = {
+        "Visão geral": None,
+        "Pipeline": None,
+        "Prospecção": None,
+        "Empresas": _total_leads,
+        "Automação": _campanhas_ativas or None,
+        "Nova empresa": None,
+    }
     pagina = st.radio(
         "Navegação",
         ["Visão geral", "Pipeline", "Prospecção", "Empresas", "Automação", "Nova empresa"],
@@ -1241,34 +1502,57 @@ with st.sidebar:
             "Empresas": ":material/business:  Clientes / Empresas",
             "Automação": ":material/bolt:  Automação",
             "Nova empresa": ":material/add_business:  Nova empresa",
-        }[item],
+        }[item]
+        + (f"  ·  {contadores_nav[item]}" if contadores_nav[item] else ""),
         label_visibility="collapsed",
         key="navegacao_principal",
     )
     st.markdown('<div class="sidebar-caption">Sistema</div>', unsafe_allow_html=True)
     estado_sidebar = status_worker()
-    status_texto = "Operacional" if estado_sidebar["online"] else "Offline"
-    st.caption(f"Worker · {status_texto}")
-    st.caption("Scorpions CRM · v1.0")
+    worker_online = bool(estado_sidebar["online"])
+    st.markdown(
+        f'<div class="sidebar-status"><span class="dot" style="{"" if worker_online else "background:var(--weak);animation:none;"}"></span>'
+        f'Worker · {"Operacional" if worker_online else "Offline"}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption("Scorpions CRM · v1.1")
     st.caption(f"Logado como {st.session_state.get('usuario_logado', '—')}")
     if st.button("Sair", use_container_width=True):
         st.session_state.pop("autenticado", None)
         st.session_state.pop("usuario_logado", None)
         st.rerun()
 
-st.markdown(
-        """
-        <div class="header-shell">
-            <div class="title-badge">SCORPIONS / soluções tecnológicas</div>
-            <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-top:0.7rem;">
-                <h1>Scorpions CRM</h1>
-                <div class="status-pill">Operacional</div>
-            </div>
-            <p>Prospecção, pipeline e operação comercial em um só lugar.</p>
+_TITULOS_PAGINA = {
+    "Visão geral": ("Scorpions CRM", "Operacional", "Prospecção, pipeline e operação comercial em um só lugar."),
+    "Pipeline": ("Pipeline", "4 etapas", "Negócios abertos e valor em proposta por etapa."),
+    "Prospecção": ("Prospecção", "Bacen · CVM · B3", "Captura em fontes públicas com scoring de ICP."),
+    "Empresas": (f"Clientes", f"{_total_leads} registros", "Base cadastral, consulta CNPJ e exclusão segura."),
+    "Automação": ("Automação", "Worker ativo" if worker_online else "Worker offline", "Campanhas agendadas, motor contínuo e histórico."),
+    "Nova empresa": ("Nova empresa", "Cadastro manual", "Campos obrigatórios validados antes de salvar."),
+}
+_titulo_pagina, _badge_pagina, _subtitulo_pagina = _TITULOS_PAGINA[pagina]
+
+with st.container(key="header_shell"):
+    st.markdown(
+        f"""
+        <div class="title-badge">SCORPIONS / soluções tecnológicas</div>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-top:0.7rem;">
+            <h1>{_titulo_pagina}</h1>
+            <div class="status-pill">{_badge_pagina}</div>
         </div>
+        <p>{_subtitulo_pagina}</p>
         """,
         unsafe_allow_html=True,
-)
+    )
+    col_prosp, col_nova, _col_spacer = st.columns([1.1, 1.4, 3])
+    with col_prosp:
+        if st.button("Prospectar", key="header_ir_prospectar", use_container_width=True):
+            st.session_state["navegacao_solicitada"] = "Prospecção"
+            st.rerun()
+    with col_nova:
+        if st.button("+ Nova empresa", key="header_ir_nova", type="primary", use_container_width=True):
+            st.session_state["navegacao_solicitada"] = "Nova empresa"
+            st.rerun()
 
 aba_dashboard = pagina == "Visão geral"
 aba_funil = pagina == "Pipeline"
@@ -1279,7 +1563,7 @@ aba_base = pagina == "Empresas"
 aba_manual = pagina == "Nova empresa"
 
 if aba_dashboard:
-    dados = listar_leads()
+    dados = _leads_para_contadores
     total = len(dados)
     fechados = int((dados["status"] == "Fechado / Contrato").sum()) if total else 0
     em_andamento = int(
@@ -1289,6 +1573,18 @@ if aba_dashboard:
     valor_total = float(dados["valor_proposta"].fillna(0).sum()) if total else 0.0
     propostas = int((dados["status"] == "Proposta Enviada").sum()) if total else 0
     novos = int((dados["status"] == "Novos Leads").sum()) if total else 0
+    valor_propostas = float(
+        dados.loc[dados["status"] == "Proposta Enviada", "valor_proposta"].fillna(0).sum()
+    ) if total else 0.0
+
+    hoje = datetime.now(timezone.utc).date()
+    if total and "criado_em" in dados.columns:
+        criado_em_dt = pd.to_datetime(dados["criado_em"], errors="coerce", utc=True)
+        novos_no_mes = int(((criado_em_dt.dt.year == hoje.year) & (criado_em_dt.dt.month == hoje.month)).sum())
+    else:
+        novos_no_mes = 0
+
+    nota_conversao_cor = "#7DD3FC" if conversao >= 6 else "#ff8f8f"
 
     st.markdown(
         """
@@ -1296,168 +1592,305 @@ if aba_dashboard:
           <div class="sales-summary__item">
             <span class="label">Leads na base</span>
             <strong>{}</strong>
+            <span class="note" style="color:#7DD3FC">+{} este mês</span>
           </div>
           <div class="sales-summary__item">
             <span class="label">Novo pipeline</span>
             <strong>{}</strong>
+            <span class="note">sem primeiro contato</span>
           </div>
           <div class="sales-summary__item">
             <span class="label">Em andamento</span>
             <strong>{}</strong>
+            <span class="note">{} em proposta enviada</span>
           </div>
           <div class="sales-summary__item">
             <span class="label">Propostas</span>
             <strong>{}</strong>
+            <span class="note" style="color:#7DD3FC">R$ {:,.0f} em jogo</span>
           </div>
           <div class="sales-summary__item">
             <span class="label">Fechados</span>
             <strong>{}</strong>
+            <span class="note">no total da base</span>
           </div>
           <div class="sales-summary__item">
             <span class="label">Conversão</span>
             <strong>{:.1f}%</strong>
+            <span class="note" style="color:{}">meta 6%</span>
           </div>
           <div class="sales-summary__item accent">
             <span class="label">Valor bruto</span>
-            <strong>R$ {:,.2f}</strong>
+            <strong>R$ {:,.0f}</strong>
+            <span class="note">soma de propostas ativas</span>
           </div>
         </div>
-        """.format(total, novos, em_andamento, propostas, fechados, conversao, valor_total),
+        """.format(
+            total, novos_no_mes, novos, em_andamento, propostas, propostas, valor_propostas,
+            fechados, conversao, nota_conversao_cor, valor_total,
+        ),
         unsafe_allow_html=True,
     )
 
     if total:
-        st.divider()
-        c1, c2 = st.columns(2)
-        with c1:
-            st.subheader("Pipeline por etapa")
-            pipeline_por_etapa = (
-                dados["status"]
-                .value_counts()
-                .rename_axis("Etapa")
-                .rename("Quantidade")
-                .to_frame()
-            )
-            if not pipeline_por_etapa.empty:
-                st.dataframe(
-                    pipeline_por_etapa.reset_index(),
-                    width="stretch",
-                    hide_index=True,
-                    column_config={
-                        "Etapa": st.column_config.TextColumn("Etapa"),
-                        "Quantidade": st.column_config.NumberColumn("Leads", format="%d"),
-                    },
-                )
-            st.subheader("Geração por mês")
-            if 'criado_em' in dados.columns and not dados['criado_em'].isnull().all():
-                dados_grafico = dados.copy()
-                dados_grafico["criado_em_dt"] = pd.to_datetime(dados_grafico["criado_em"], errors="coerce")
-                dados_grafico.dropna(subset=["criado_em_dt"], inplace=True)
-                if not dados_grafico.empty:
-                    leads_por_mes = (
-                        dados_grafico.set_index("criado_em_dt")
-                        .resample("ME")
-                        .size()
-                        .rename("Novos Leads")
-                        .to_frame()
-                    )
-                    leads_por_mes.index = leads_por_mes.index.strftime("%Y-%m")
-                    if not leads_por_mes.empty:
-                        leads_por_mes = leads_por_mes.rename_axis("Mês").reset_index()
-                        st.dataframe(
-                            leads_por_mes,
-                            width="stretch",
-                            hide_index=True,
-                            column_config={
-                                "Mês": st.column_config.TextColumn("Mês"),
-                                "Novos Leads": st.column_config.NumberColumn("Leads", format="%d"),
-                            },
-                        )
-                else:
-                    st.caption("Ainda não há datas válidas para exibir evolução.")
-        with c2:
-            st.subheader("ICP por segmento")
-            icp_por_segmento = (
-                dados["segmento_icp"]
-                .fillna("Não classificado")
-                .replace("", "Não classificado")
-                .value_counts()
-                .rename_axis("ICP")
-                .rename("Quantidade")
-                .to_frame()
-            )
-            if not icp_por_segmento.empty:
-                st.dataframe(
-                    icp_por_segmento.reset_index(),
-                    width="stretch",
-                    hide_index=True,
-                    column_config={
-                        "ICP": st.column_config.TextColumn("ICP"),
-                        "Quantidade": st.column_config.NumberColumn("Leads", format="%d"),
-                    },
-                )
-            st.subheader("Nicho principal")
-            nichos_principais = (
-                dados["nicho"]
-                .fillna("Não informado")
-                .replace("", "Não informado")
-                .value_counts()
-                .head(10)
-                .rename_axis("Nicho")
-                .rename("Quantidade")
-                .to_frame()
-            )
-            if not nichos_principais.empty:
-                st.dataframe(
-                    nichos_principais.reset_index(),
-                    width="stretch",
-                    hide_index=True,
-                    column_config={
-                        "Nicho": st.column_config.TextColumn("Nicho"),
-                        "Quantidade": st.column_config.NumberColumn("Leads", format="%d"),
-                    },
-                )
-            st.subheader("Valor em proposta")
-            etapas_ativas_para_grafico = [
-                "Novos Leads", "Contato / Qualificação", "Vistoria Técnica / Diagnóstico", "Proposta Enviada"
-            ]
-            valores_por_etapa = dados[
-                dados["status"].isin(etapas_ativas_para_grafico)
-            ].groupby("status")["valor_proposta"].sum()
-            valores_por_etapa = pd.to_numeric(valores_por_etapa, errors="coerce").fillna(0)
-            if not valores_por_etapa.empty and valores_por_etapa.sum() > 0:
-                dados_valor = valores_por_etapa.rename("Valor").rename_axis("Etapa").reset_index()
-                st.dataframe(
-                    dados_valor,
-                    width="stretch",
-                    hide_index=True,
-                    column_config={
-                        "Etapa": st.column_config.TextColumn("Etapa"),
-                        "Valor": st.column_config.NumberColumn("Valor", format="R$ %.2f"),
-                    },
-                )
-            else:
-                st.info("Nenhuma proposta com valor registrado nas etapas ativas do funil.")
+        etapas_funil_dash = [etapa for etapa in STATUS if etapa not in ("Fechado / Contrato", "Descartado")]
+        contagens_funil = [int((dados["status"] == etapa).sum()) for etapa in etapas_funil_dash]
+        valores_funil = [
+            float(dados.loc[dados["status"] == etapa, "valor_proposta"].fillna(0).sum())
+            for etapa in etapas_funil_dash
+        ]
+        max_contagem_funil = max(1, max(contagens_funil))
 
-        atividades_recentes = listar_atividades(8)
-        if atividades_recentes:
-            st.subheader("Atividade recente")
-            tabela_atividades = pd.DataFrame(atividades_recentes)
-            tabela_atividades["criado_em"] = pd.to_datetime(
-                tabela_atividades["criado_em"], errors="coerce", utc=True
-            ).dt.strftime("%d/%m/%Y %H:%M")
-            tabela_atividades["empresa"] = tabela_atividades["nome_empresa"].fillna("Lead removido")
-            st.dataframe(
-                tabela_atividades[["criado_em", "tipo", "empresa", "descricao"]],
-                width="stretch",
-                hide_index=True,
-                column_config={
-                    "criado_em": st.column_config.TextColumn("Quando"),
-                    "tipo": st.column_config.TextColumn("Evento"),
-                    "empresa": st.column_config.TextColumn("Empresa"),
-                    "descricao": st.column_config.TextColumn("Detalhes"),
-                },
+        icp_base = dados["segmento_icp"].fillna("").astype(str)
+        classificados_mask = ~icp_base.isin(["", "Não classificado"])
+        nao_classificados = total - int(classificados_mask.sum())
+        icp_agrupado = (
+            dados.loc[classificados_mask]
+            .groupby(icp_base[classificados_mask])["pontuacao"]
+            .agg(["count", "mean"])
+            .sort_values("count", ascending=False)
+            .head(5)
+        ) if classificados_mask.any() else pd.DataFrame(columns=["count", "mean"])
+
+        col_funil, col_icp = st.columns([1.25, 1])
+        with col_funil:
+            with st.container(key="dash_funil_card"):
+                st.markdown(
+                    '<h3 style="margin:0;font-family:Orbitron,sans-serif;font-size:0.85rem;font-weight:600;'
+                    'letter-spacing:0.12em;text-transform:uppercase;color:#F5F7FA;">Funil comercial</h3>'
+                    '<div style="font-size:0.7rem;color:#5A6373;margin-top:0.2rem;">visão geral do pipeline ativo</div>',
+                    unsafe_allow_html=True,
+                )
+                linhas_funil = "".join(
+                    '<div class="funnel-row">'
+                    '<div class="funnel-top">'
+                    f'<span>{etapa}</span>'
+                    f'<span class="val">{contagem} <span class="sep">·</span> R$ {valor:,.0f}</span>'
+                    '</div>'
+                    '<div class="funnel-track">'
+                    f'<div class="funnel-fill" style="width:{max(4, round(contagem / max_contagem_funil * 100))}%"></div>'
+                    '</div>'
+                    '</div>'
+                    for etapa, contagem, valor in zip(etapas_funil_dash, contagens_funil, valores_funil)
+                )
+                st.markdown(f'<div style="margin-top:1rem;">{linhas_funil}</div>', unsafe_allow_html=True)
+
+        with col_icp:
+            with st.container(key="dash_icp_card"):
+                st.markdown(
+                    '<h3 style="margin:0;font-family:Orbitron,sans-serif;font-size:0.85rem;font-weight:600;'
+                    'letter-spacing:0.12em;text-transform:uppercase;color:#F5F7FA;">ICP por segmento</h3>',
+                    unsafe_allow_html=True,
+                )
+                if not icp_agrupado.empty:
+                    linhas_icp = "".join(
+                        '<div class="icp-row">'
+                        f'<span class="name">{nome}</span>'
+                        f'<span class="leads">{int(linha["count"])} leads</span>'
+                        f'<span class="chip chip-accent">score {round(linha["mean"]) if pd.notna(linha["mean"]) else "—"}</span>'
+                        '</div>'
+                        for nome, linha in icp_agrupado.iterrows()
+                    )
+                    st.markdown(f'<div style="margin-top:0.7rem;">{linhas_icp}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(
+                        '<div style="margin-top:0.7rem;font-size:0.78rem;color:#8A94A6;">'
+                        'Nenhum lead classificado por ICP ainda.</div>',
+                        unsafe_allow_html=True,
+                    )
+                if nao_classificados > 0:
+                    st.markdown(
+                        f"""
+                        <div class="icp-alert">
+                          <div class="icp-alert-title">{nao_classificados} de {total} leads sem ICP</div>
+                          <p>O scoring não segmenta sem CNPJ. Complete o cadastro para destravar o funil.</p>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    if st.button("Completar cadastros", key="dash_completar_cadastros"):
+                        st.session_state["navegacao_solicitada"] = "Empresas"
+                        st.rerun()
+
+        st.markdown('<div style="height:0.4rem"></div>', unsafe_allow_html=True)
+        st.markdown(
+            '<h3 style="margin:0.6rem 0 0;font-family:Orbitron,sans-serif;font-size:0.85rem;font-weight:600;'
+            'letter-spacing:0.12em;text-transform:uppercase;color:#F5F7FA;">Precisa de atenção hoje</h3>',
+            unsafe_allow_html=True,
+        )
+
+        cartoes_atencao: list[tuple[str, str, str, str]] = []
+        propostas_df = dados[(dados["status"] == "Proposta Enviada") & (dados["valor_proposta"].fillna(0) > 0)]
+        if not propostas_df.empty:
+            atualizado_dt = pd.to_datetime(propostas_df["atualizado_em"], errors="coerce", utc=True)
+            dias_desde = (pd.Timestamp.now(tz="UTC") - atualizado_dt).dt.days
+            idx_mais_antiga = dias_desde.idxmax() if dias_desde.notna().any() else propostas_df.index[0]
+            linha = propostas_df.loc[idx_mais_antiga]
+            dias = int(dias_desde.loc[idx_mais_antiga]) if pd.notna(dias_desde.loc[idx_mais_antiga]) else None
+            nota = (
+                f"R$ {linha['valor_proposta']:,.0f} enviados há {dias} dia(s) — sem retorno."
+                if dias is not None
+                else f"R$ {linha['valor_proposta']:,.0f} aguardando retorno."
             )
+            cartoes_atencao.append(("Proposta vencendo", linha["nome_empresa"], nota, "#ff8f8f"))
+
+        vistoria_df = dados[dados["status"] == "Vistoria Técnica / Diagnóstico"].copy()
+        if not vistoria_df.empty and "proximo_contato" in vistoria_df.columns:
+            vistoria_df["_data"] = pd.to_datetime(vistoria_df["proximo_contato"], errors="coerce").dt.date
+            vistoria_hoje = vistoria_df[vistoria_df["_data"] == hoje]
+            if not vistoria_hoje.empty:
+                linha = vistoria_hoje.iloc[0]
+                cartoes_atencao.append((
+                    "Vistoria hoje", linha["nome_empresa"],
+                    f"Diagnóstico técnico agendado — {linha.get('endereco') or linha.get('cidade') or 'endereço não informado'}.",
+                    "#7DD3FC",
+                ))
+
+        sem_contato_df = dados[
+            (dados["status"] == "Novos Leads")
+            & (dados["proximo_contato"].isna() | (dados["proximo_contato"].astype(str).str.strip() == ""))
+        ]
+        if not sem_contato_df.empty:
+            cartoes_atencao.append((
+                "Sem contato", f"{len(sem_contato_df)} leads em Novos Leads",
+                "Nenhuma tentativa registrada desde a captura.", "#8A94A6",
+            ))
+
+        if cartoes_atencao:
+            colunas_atencao = st.columns(len(cartoes_atencao))
+            for coluna, (kicker, titulo, nota, cor) in zip(colunas_atencao, cartoes_atencao):
+                with coluna:
+                    st.markdown(
+                        f"""
+                        <div class="attn-card">
+                          <div class="attn-kicker" style="color:{cor}">{kicker}</div>
+                          <div class="attn-title">{titulo}</div>
+                          <div class="attn-note">{nota}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+        else:
+            st.markdown(
+                '<div class="dashed-empty"><div class="dashed-title">Tudo em dia</div>'
+                '<p>Nenhuma pendência crítica identificada para hoje.</p></div>',
+                unsafe_allow_html=True,
+            )
+
+        st.divider()
+
+    if total:
+        with st.expander("Mais indicadores"):
+            c1, c2 = st.columns(2)
+            with c1:
+                st.subheader("Pipeline por etapa")
+                pipeline_por_etapa = (
+                    dados["status"]
+                    .value_counts()
+                    .rename_axis("Etapa")
+                    .rename("Quantidade")
+                    .to_frame()
+                )
+                if not pipeline_por_etapa.empty:
+                    st.dataframe(
+                        pipeline_por_etapa.reset_index(),
+                        width="stretch",
+                        hide_index=True,
+                        column_config={
+                            "Etapa": st.column_config.TextColumn("Etapa"),
+                            "Quantidade": st.column_config.NumberColumn("Leads", format="%d"),
+                        },
+                    )
+                st.subheader("Geração por mês")
+                if 'criado_em' in dados.columns and not dados['criado_em'].isnull().all():
+                    dados_grafico = dados.copy()
+                    dados_grafico["criado_em_dt"] = pd.to_datetime(dados_grafico["criado_em"], errors="coerce")
+                    dados_grafico.dropna(subset=["criado_em_dt"], inplace=True)
+                    if not dados_grafico.empty:
+                        leads_por_mes = (
+                            dados_grafico.set_index("criado_em_dt")
+                            .resample("ME")
+                            .size()
+                            .rename("Novos Leads")
+                            .to_frame()
+                        )
+                        leads_por_mes.index = leads_por_mes.index.strftime("%Y-%m")
+                        if not leads_por_mes.empty:
+                            leads_por_mes = leads_por_mes.rename_axis("Mês").reset_index()
+                            st.dataframe(
+                                leads_por_mes,
+                                width="stretch",
+                                hide_index=True,
+                                column_config={
+                                    "Mês": st.column_config.TextColumn("Mês"),
+                                    "Novos Leads": st.column_config.NumberColumn("Leads", format="%d"),
+                                },
+                            )
+                    else:
+                        st.caption("Ainda não há datas válidas para exibir evolução.")
+            with c2:
+                st.subheader("Nicho principal")
+                nichos_principais = (
+                    dados["nicho"]
+                    .fillna("Não informado")
+                    .replace("", "Não informado")
+                    .value_counts()
+                    .head(10)
+                    .rename_axis("Nicho")
+                    .rename("Quantidade")
+                    .to_frame()
+                )
+                if not nichos_principais.empty:
+                    st.dataframe(
+                        nichos_principais.reset_index(),
+                        width="stretch",
+                        hide_index=True,
+                        column_config={
+                            "Nicho": st.column_config.TextColumn("Nicho"),
+                            "Quantidade": st.column_config.NumberColumn("Leads", format="%d"),
+                        },
+                    )
+                st.subheader("Valor em proposta")
+                etapas_ativas_para_grafico = [
+                    "Novos Leads", "Contato / Qualificação", "Vistoria Técnica / Diagnóstico", "Proposta Enviada"
+                ]
+                valores_por_etapa = dados[
+                    dados["status"].isin(etapas_ativas_para_grafico)
+                ].groupby("status")["valor_proposta"].sum()
+                valores_por_etapa = pd.to_numeric(valores_por_etapa, errors="coerce").fillna(0)
+                if not valores_por_etapa.empty and valores_por_etapa.sum() > 0:
+                    dados_valor = valores_por_etapa.rename("Valor").rename_axis("Etapa").reset_index()
+                    st.dataframe(
+                        dados_valor,
+                        width="stretch",
+                        hide_index=True,
+                        column_config={
+                            "Etapa": st.column_config.TextColumn("Etapa"),
+                            "Valor": st.column_config.NumberColumn("Valor", format="R$ %.2f"),
+                        },
+                    )
+                else:
+                    st.info("Nenhuma proposta com valor registrado nas etapas ativas do funil.")
+
+            atividades_recentes = listar_atividades(8)
+            if atividades_recentes:
+                st.subheader("Atividade recente")
+                tabela_atividades = pd.DataFrame(atividades_recentes)
+                tabela_atividades["criado_em"] = pd.to_datetime(
+                    tabela_atividades["criado_em"], errors="coerce", utc=True
+                ).dt.strftime("%d/%m/%Y %H:%M")
+                tabela_atividades["empresa"] = tabela_atividades["nome_empresa"].fillna("Lead removido")
+                st.dataframe(
+                    tabela_atividades[["criado_em", "tipo", "empresa", "descricao"]],
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        "criado_em": st.column_config.TextColumn("Quando"),
+                        "tipo": st.column_config.TextColumn("Evento"),
+                        "empresa": st.column_config.TextColumn("Empresa"),
+                        "descricao": st.column_config.TextColumn("Detalhes"),
+                    },
+                )
     else:
         st.info("Sua base ainda está vazia. Busque ou cadastre o primeiro lead.")
 
@@ -1473,6 +1906,12 @@ if aba_funil:
             total_valor_etapa = leads_na_etapa['valor_proposta'].sum()
             st.subheader(f"{etapa} ({len(leads_na_etapa)})", divider="blue")
             st.caption(f"Valor em propostas: R$ {total_valor_etapa:,.2f}")
+            if leads_na_etapa.empty:
+                st.markdown(
+                    '<div class="dashed-empty" style="padding:1.1rem 0.9rem;">'
+                    '<p style="margin:0;">Nada nesta etapa. Mova um lead pelo seletor do cartão.</p></div>',
+                    unsafe_allow_html=True,
+                )
             for _, lead in leads_na_etapa.sort_values("pontuacao", ascending=False).iterrows():
                 _render_kanban_card(lead, etapa)
 
@@ -1551,9 +1990,19 @@ if aba_prospeccao:
         ),
     )
 
-    if google_places_configurado:
-        st.caption("Google Places · conectado")
-    elif fonte_busca == "Google Places":
+    _chips_fonte = [("Google Places", "conectado" if google_places_configurado else "sem chave")]
+    _chips_fonte += [(f, "público") for f in ("Bacen", FONTE_CVM, FONTE_B3)]
+    _chips_fonte.append((FONTE_OSM, "fallback"))
+    st.markdown(
+        '<div class="source-chip-row">'
+        + "".join(
+            f'<span class="chip {"chip-accent" if rotulo == "conectado" else "chip-neutral"}">{nome} · {rotulo}</span>'
+            for nome, rotulo in _chips_fonte
+        )
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+    if not google_places_configurado and fonte_busca == "Google Places":
         st.warning("Preencha `GOOGLE_PLACES_API_KEY` em `.streamlit/secrets.toml` e reinicie o Streamlit.")
 
     if fonte_busca == FONTE_AUTOMATICA:
@@ -1641,55 +2090,51 @@ if aba_prospeccao:
             inseridos, duplicados = salvar_leads(resultados)
             st.success(f"{inseridos} lead(s) adicionado(s). {duplicados} duplicado(s) ignorado(s).")
 
-if aba_cnpj:
-    st.subheader("Consulta cadastral pela BrasilAPI")
-    st.caption("A consulta usa dados públicos e não exige chave de API.")
-    cnpj_informado = st.text_input(
-        "CNPJ",
-        placeholder="00.000.000/0001-91",
-        max_chars=18,
-        help="Você pode informar o CNPJ com ou sem pontuação.",
+@st.dialog("Excluir campanha?")
+def _confirmar_exclusao_campanha(campanha_id: int, nome: str) -> None:
+    st.markdown(
+        f'<p style="font-size:0.82rem;color:#C3CBD8;line-height:1.65;margin:0 0 0.2rem;">'
+        f'A campanha "{nome}" e seu histórico de execuções serão removidos. '
+        f'Os leads já capturados permanecem na base.</p>',
+        unsafe_allow_html=True,
     )
-    if st.button("Consultar empresa", type="primary", width="stretch"):
-        with st.spinner("Consultando a BrasilAPI..."):
-            resultado_cnpj = consultar_empresa_brasilapi(cnpj_informado)
-        if "erro" in resultado_cnpj:
-            st.session_state.pop("resultado_cnpj", None)
-            st.error(resultado_cnpj["erro"])
-        else:
-            st.session_state["resultado_cnpj"] = enriquecer_lead_icp(resultado_cnpj)
-            st.success("Empresa localizada.")
+    digitado = st.text_input("Digite o nome da campanha para confirmar", key="digitado_exclusao_campanha")
+    confirma_habilitado = digitado.strip().lower() == nome.strip().lower()
+    col_cancelar, col_excluir = st.columns(2)
+    with col_cancelar:
+        if st.button("Cancelar", use_container_width=True, key="cancelar_exclusao_campanha"):
+            st.session_state["confirmar_exclusao_campanha_id"] = None
+            st.rerun()
+    with col_excluir:
+        if st.button(
+            "Excluir definitivamente", type="primary", use_container_width=True,
+            disabled=not confirma_habilitado, key="confirmar_exclusao_campanha_botao",
+        ):
+            excluir_campanha(campanha_id)
+            st.session_state["confirmar_exclusao_campanha_id"] = None
+            st.session_state["aviso_automacao"] = f"Campanha '{nome}' excluída; o histórico foi preservado."
+            st.rerun()
 
-    empresa_consultada = st.session_state.get("resultado_cnpj")
-    if empresa_consultada:
-        st.markdown(f"### {empresa_consultada.get('nome_empresa', '')}")
-        st.caption(f"**CNPJ:** {formatar_cnpj(empresa_consultada.get('cnpj', ''))} | **Situação:** {empresa_consultada.get('status_receita', 'N/A')}")
-
-        st.markdown(f"**Segmento ICP:** {empresa_consultada.get('segmento_icp', 'Não classificado')}")
-        if empresa_consultada.get('servicos_recomendados'):
-            st.info(f"**Serviços Scorpions recomendados:** {empresa_consultada.get('servicos_recomendados')}")
-
-        with st.expander("Dados Cadastrais"):
-            st.markdown(f"**Razão Social:** {empresa_consultada.get('razao_social', 'N/A')}")
-            st.markdown(f"**Atividade Principal (CNAE):** {empresa_consultada.get('nicho', 'N/A')}")
-            st.markdown(f"**Contato Societário (QSA):** {empresa_consultada.get('decisor', 'N/A')}")
-            st.markdown(f"**Endereço:** {empresa_consultada.get('endereco', 'N/A')}")
-            st.markdown(f"**Telefone:** {empresa_consultada.get('telefone') or 'N/A'}")
-            st.markdown(f"**E-mail:** {empresa_consultada.get('email') or 'N/A'}")
-
-        if st.button("Adicionar empresa à base"):
-            inseridos, duplicados = salvar_leads([empresa_consultada])
-            if inseridos:
-                st.success("Empresa adicionada ao pipeline.")
-            elif duplicados:
-                st.info("Essa empresa já está cadastrada na base.")
 
 if aba_automacao:
     estado_worker = status_worker()
-    if estado_worker["online"]:
-        st.success("Worker online — as campanhas agendadas estão sendo monitoradas.")
-    else:
-        st.warning("Worker offline — inicie com `python worker.py` para executar a agenda em segundo plano.")
+    _worker_dot_style = "" if estado_worker["online"] else "background:var(--weak);animation:none;"
+    _worker_texto = (
+        "Worker online — as campanhas agendadas estão sendo monitoradas."
+        if estado_worker["online"]
+        else "Worker offline — inicie com `python worker.py` para executar a agenda em segundo plano."
+    )
+    st.markdown(
+        f"""
+        <div style="display:flex;align-items:center;gap:0.6rem;background:rgba(37,104,255,.06);
+                    border:1px solid rgba(125,211,252,.22);border-left:2px solid var(--primary);
+                    border-radius:3px;padding:0.7rem 0.9rem;font-size:0.82rem;color:#C3CBD8;">
+          <span class="dot" style="width:6px;height:6px;border-radius:50%;background:var(--primary);flex:none;{_worker_dot_style}"></span>
+          {_worker_texto}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     aviso_automacao = st.session_state.pop("aviso_automacao", None)
     if aviso_automacao:
@@ -1754,21 +2199,38 @@ if aba_automacao:
 
         campanhas_atuais = listar_campanhas() # type: ignore
         if campanhas_atuais:
-            tabela_campanhas = pd.DataFrame(campanhas_atuais)
-            tabela_campanhas["ativa"] = tabela_campanhas["ativa"].map({1: "Sim", 0: "Não"})
-            st.dataframe(
-                tabela_campanhas[
-                    ["id", "nome", "nicho", "localizacao", "fonte", "limite_diario", "horario", "ativa", "ultima_execucao"]
-                ],
-                width="stretch",
-                hide_index=True,
-            )
+            colunas_campanhas = st.columns(min(3, len(campanhas_atuais)) or 1)
+            for indice_campanha, campanha in enumerate(campanhas_atuais):
+                ativa = bool(campanha.get("ativa"))
+                chip_classe = "chip-accent" if ativa else "chip-neutral"
+                with colunas_campanhas[indice_campanha % len(colunas_campanhas)]:
+                    st.markdown(
+                        f"""
+                        <div class="campaign-card">
+                          <div class="head">
+                            <div class="name">{campanha['nome']}</div>
+                            <span class="chip {chip_classe}">{"Ativa" if ativa else "Pausada"}</span>
+                          </div>
+                          <div class="scope">{campanha.get('nicho') or 'Todos'} · {campanha.get('localizacao') or '—'} · {campanha.get('fonte')}</div>
+                          <div class="metrics">
+                            <div><div class="m-label">Limite/dia</div><div class="m-val">{campanha.get('limite_diario')}</div></div>
+                            <div><div class="m-label">Horário</div><div class="m-val">{campanha.get('horario')}</div></div>
+                            <div><div class="m-label">Última</div><div class="m-val" style="font-family:Inter,sans-serif;font-size:0.78rem;">{campanha.get('ultima_execucao') or 'nunca'}</div></div>
+                          </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown('<div style="height:0.6rem"></div>', unsafe_allow_html=True)
 
             opcoes_campanha = {
                 f"#{campanha['id']} — {campanha['nome']}": campanha["id"] for campanha in campanhas_atuais
             }
             campanha_escolhida = st.selectbox("Gerenciar campanha", list(opcoes_campanha))
             campanha_escolhida_id = opcoes_campanha[campanha_escolhida]
+            campanha_escolhida_nome = next(
+                c["nome"] for c in campanhas_atuais if c["id"] == campanha_escolhida_id
+            )
             executar_col, alternar_col, excluir_col = st.columns(3)
             if executar_col.button("Executar agora", type="primary", width="stretch"):
                 with st.spinner("Executando a campanha..."):
@@ -1780,13 +2242,19 @@ if aba_automacao:
                 else:
                     st.error(resultado_execucao["mensagem"])
             if alternar_col.button("Ativar/pausar", width="stretch"):
-                ativa = alternar_campanha(campanha_escolhida_id)
-                st.session_state["aviso_automacao"] = "Campanha ativada." if ativa else "Campanha pausada."
+                ativa_nova = alternar_campanha(campanha_escolhida_id)
+                st.session_state["aviso_automacao"] = "Campanha ativada." if ativa_nova else "Campanha pausada."
                 st.rerun()
             if excluir_col.button("Excluir campanha", width="stretch"):
-                excluir_campanha(campanha_escolhida_id)
-                st.session_state["aviso_automacao"] = "Campanha excluída; o histórico foi preservado."
+                st.session_state["confirmar_exclusao_campanha_id"] = campanha_escolhida_id
+                st.session_state["confirmar_exclusao_campanha_nome"] = campanha_escolhida_nome
                 st.rerun()
+
+            _campanha_id_para_excluir = st.session_state.get("confirmar_exclusao_campanha_id")
+            if _campanha_id_para_excluir:
+                _confirmar_exclusao_campanha(
+                    int(_campanha_id_para_excluir), st.session_state.get("confirmar_exclusao_campanha_nome", "")
+                )
         else:
             st.info("Nenhuma campanha configurada.")
 
@@ -1917,17 +2385,60 @@ if aba_automacao:
                 inseridos, duplicados = salvar_leads(resultados_robo)
                 st.success(f"{inseridos} lead(s) salvo(s). {duplicados} duplicado(s) ignorado(s).")
 
+@st.dialog("Excluir empresa?")
+def _confirmar_exclusao_lead(lead_id: int, nome: str, cidade: str, etapa: str) -> None:
+    st.markdown(
+        f'<p style="font-size:0.82rem;color:#C3CBD8;line-height:1.65;margin:0 0 0.2rem;">'
+        f'Você vai excluir <strong>{nome}</strong> (#{lead_id} · {cidade or "—"}), hoje em {etapa}. '
+        f'Esta ação não pode ser desfeita.</p>',
+        unsafe_allow_html=True,
+    )
+    digitado = st.text_input("Digite o nome da empresa para confirmar", key="digitado_exclusao_lead")
+    confirma_habilitado = digitado.strip().lower() == nome.strip().lower()
+    col_cancelar, col_excluir = st.columns(2)
+    with col_cancelar:
+        if st.button("Cancelar", use_container_width=True, key="cancelar_exclusao_lead"):
+            st.session_state["confirmar_exclusao_lead_id"] = None
+            st.rerun()
+    with col_excluir:
+        if st.button(
+            "Excluir definitivamente", type="primary", use_container_width=True,
+            disabled=not confirma_habilitado, key="confirmar_exclusao_lead_botao",
+        ):
+            excluir_lead(lead_id)
+            st.session_state["confirmar_exclusao_lead_id"] = None
+            st.session_state["aviso_empresa"] = f"'{nome}' excluído da base."
+            st.rerun()
+
+
 if aba_base:
+    aviso_empresa = st.session_state.pop("aviso_empresa", None)
+    if aviso_empresa:
+        st.success(aviso_empresa)
+
     todos = listar_leads()
     nichos = ["Todos"] + (sorted(todos["nicho"].dropna().unique().tolist()) if not todos.empty else [])
     f1, f2, f3 = st.columns([2, 1, 1])
-    termo = f1.text_input("Pesquisar na base", placeholder="Empresa, cidade ou endereço")
+    termo = f1.text_input("Pesquisar na base", placeholder="Empresa, cidade ou CNPJ", key="busca_empresas")
     filtro_nicho = f2.selectbox("Filtrar nicho", nichos)
     filtro_status = f3.selectbox("Filtrar status", ["Todos"] + STATUS)
     base = listar_leads(termo, filtro_nicho, filtro_status)
+
     if base.empty:
-        st.info("Nenhum lead encontrado para os filtros escolhidos.")
+        st.markdown(
+            f"""
+            <div class="dashed-empty">
+              <div class="dashed-title">Nenhuma empresa com esses filtros</div>
+              <p>A base tem {len(todos)} registro(s). Limpe os filtros ou cadastre a empresa manualmente.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     else:
+        st.caption(
+            f"{len(base)} de {len(todos)} empresas · dica: clique com o botão direito no cabeçalho de uma "
+            "coluna (ex.: Empresa) para fixá-la durante a rolagem horizontal."
+        )
         if base["origem"].astype(str).str.contains("OpenStreetMap", case=False, na=False).any():
             st.caption(
                 "Parte desta base contém dados © "
@@ -1939,10 +2450,18 @@ if aba_base:
             "telefone", "site", "email", "status",
             "status_receita", "origem", "pontuacao", "motivo_qualificacao", "observacoes",
         ]
+        # A grade mostra só os campos essenciais (o resto fica em "Detalhes completos"
+        # abaixo) para evitar a rolagem horizontal densa de antes; os campos ocultos
+        # continuam presentes nos dados e participam normalmente da atualização.
+        colunas_visiveis = [
+            "nome_empresa", "cidade", "nicho", "segmento_icp",
+            "pontuacao", "status", "valor_proposta", "proximo_contato",
+        ]
         editado = st.data_editor(
             base[colunas],
             width="stretch",
             hide_index=True,
+            column_order=colunas_visiveis,
             disabled=[
                 "id", "cnpj", "status_receita", "origem", "pontuacao",
                 "motivo_qualificacao", "segmento_icp", "servicos_recomendados",
@@ -1950,6 +2469,7 @@ if aba_base:
             column_config={
                 "id": st.column_config.NumberColumn("ID", width="small"),
                 "cnpj": st.column_config.TextColumn("CNPJ"),
+                "nome_empresa": st.column_config.TextColumn("Empresa"),
                 "pontuacao": st.column_config.NumberColumn(
                     "Score", min_value=0, max_value=100, format="%d"
                 ),
@@ -1957,13 +2477,13 @@ if aba_base:
                 "segmento_icp": st.column_config.TextColumn("Segmento ICP"),
                 "servicos_recomendados": st.column_config.TextColumn("Serviços Recomendados"),
                 "valor_proposta": st.column_config.NumberColumn(
-                    "Valor Proposta",
+                    "Proposta",
                     format="R$ %.2f",
                     min_value=0.0,
                 ),
-                "status": st.column_config.SelectboxColumn("Status", options=STATUS, required=True),
+                "status": st.column_config.SelectboxColumn("Etapa", options=STATUS, required=True),
                 "proximo_contato": st.column_config.DateColumn(
-                    "Próximo Contato",
+                    "Próximo contato",
                     format="DD/MM/YYYY",
                     help="Data para o próximo follow-up com o lead.",
                 ),
@@ -1971,18 +2491,43 @@ if aba_base:
             },
             key="editor_leads",
         )
-        salvar_col, excluir_col = st.columns(2)
-        with salvar_col:
-            if st.button("Salvar alterações", type="primary", width="stretch"):
-                quantidade = atualizar_leads(editado, base[colunas])
-                st.success(f"{quantidade} lead(s) atualizado(s).")
-                st.rerun()
-        with excluir_col:
-            id_excluir = st.selectbox("Excluir lead", ["Selecione..."] + base["id"].astype(str).tolist())
-            if id_excluir != "Selecione..." and st.button("Confirmar exclusão", width="stretch"):
-                excluir_lead(int(id_excluir))
-                st.success("Lead excluído.")
-                st.rerun()
+        if st.button("Salvar alterações", type="primary", width="stretch"):
+            quantidade = atualizar_leads(editado, base[colunas])
+            st.success(f"{quantidade} lead(s) atualizado(s).")
+            st.rerun()
+
+        opcoes_empresas = {
+            f"{linha['nome_empresa']} — #{linha['id']} · {linha['cidade'] or '—'} · {linha['status']}": int(linha["id"])
+            for _, linha in base.iterrows()
+        }
+
+        with st.expander("Detalhes completos de uma empresa"):
+            rotulo_detalhe = st.selectbox(
+                "Selecione a empresa", ["Selecione..."] + list(opcoes_empresas.keys()), key="detalhe_empresa_select"
+            )
+            if rotulo_detalhe != "Selecione...":
+                linha_detalhe = base[base["id"] == opcoes_empresas[rotulo_detalhe]].iloc[0]
+                campos_detalhe = [
+                    ("Razão social", linha_detalhe.get("razao_social") or "não informada"),
+                    ("CNPJ", formatar_cnpj(linha_detalhe["cnpj"]) if linha_detalhe.get("cnpj") else "pendente de consulta"),
+                    ("Decisor", linha_detalhe.get("decisor") or "não mapeado"),
+                    ("Endereço", linha_detalhe.get("endereco") or "não informado"),
+                    (
+                        "Contato",
+                        " · ".join(filter(None, [linha_detalhe.get("telefone"), linha_detalhe.get("site")])) or "sem contato",
+                    ),
+                    ("Serviços recomendados", linha_detalhe.get("servicos_recomendados") or "—"),
+                    ("E-mail", linha_detalhe.get("email") or "não informado"),
+                    ("Observações", linha_detalhe.get("observacoes") or "—"),
+                ]
+                cols_detalhe = st.columns(2)
+                for indice, (rotulo, valor) in enumerate(campos_detalhe):
+                    with cols_detalhe[indice % 2]:
+                        st.markdown(
+                            f'<div class="detail-label">{rotulo}</div><div class="detail-value">{valor}</div>'
+                            '<div style="height:0.6rem"></div>',
+                            unsafe_allow_html=True,
+                        )
 
         st.divider()
         csv_data = base.to_csv(index=False).encode("utf-8")
@@ -1993,6 +2538,81 @@ if aba_base:
             mime="text/csv",
             width="stretch",
         )
+
+        st.markdown('<div style="height:0.8rem"></div>', unsafe_allow_html=True)
+        col_cnpj_card, col_delete_card = st.columns(2)
+        with col_cnpj_card:
+            with st.container(key="cnpj_card"):
+                st.markdown(
+                    '<div class="card-title">Consulta cadastral · BrasilAPI</div>'
+                    '<p class="card-note">Dados públicos, sem chave. Preenche razão social, endereço e CNAE.</p>',
+                    unsafe_allow_html=True,
+                )
+                col_cnpj_input, col_cnpj_botao = st.columns([2, 1])
+                cnpj_informado = col_cnpj_input.text_input(
+                    "CNPJ", placeholder="00.000.000/0001-91", max_chars=18, label_visibility="collapsed",
+                )
+                consultar_clicado = col_cnpj_botao.button("Consultar", type="primary", use_container_width=True)
+                if consultar_clicado:
+                    with st.spinner("Consultando a BrasilAPI..."):
+                        resultado_cnpj = consultar_empresa_brasilapi(cnpj_informado)
+                    if "erro" in resultado_cnpj:
+                        st.session_state.pop("resultado_cnpj", None)
+                        st.error(resultado_cnpj["erro"])
+                    else:
+                        st.session_state["resultado_cnpj"] = enriquecer_lead_icp(resultado_cnpj)
+                        st.success("Empresa localizada.")
+
+                empresa_consultada = st.session_state.get("resultado_cnpj")
+                if empresa_consultada:
+                    st.markdown(f"**{empresa_consultada.get('nome_empresa', '')}**")
+                    st.caption(
+                        f"CNPJ: {formatar_cnpj(empresa_consultada.get('cnpj', ''))} · "
+                        f"Situação: {empresa_consultada.get('status_receita', 'N/A')} · "
+                        f"ICP: {empresa_consultada.get('segmento_icp', 'Não classificado')}"
+                    )
+                    with st.expander("Dados cadastrais completos"):
+                        st.markdown(f"**Razão social:** {empresa_consultada.get('razao_social', 'N/A')}")
+                        st.markdown(f"**Atividade (CNAE):** {empresa_consultada.get('nicho', 'N/A')}")
+                        st.markdown(f"**Contato societário (QSA):** {empresa_consultada.get('decisor', 'N/A')}")
+                        st.markdown(f"**Endereço:** {empresa_consultada.get('endereco', 'N/A')}")
+                        st.markdown(f"**Telefone:** {empresa_consultada.get('telefone') or 'N/A'}")
+                        st.markdown(f"**E-mail:** {empresa_consultada.get('email') or 'N/A'}")
+                    if st.button("Adicionar empresa à base", key="adicionar_empresa_cnpj"):
+                        inseridos, duplicados = salvar_leads([empresa_consultada])
+                        if inseridos:
+                            st.cache_data.clear()
+                            st.success("Empresa adicionada ao pipeline.")
+                        elif duplicados:
+                            st.info("Essa empresa já está cadastrada na base.")
+
+        with col_delete_card:
+            with st.container(key="delete_card"):
+                st.markdown(
+                    '<div class="card-title danger">Excluir registro</div>'
+                    '<p class="card-note">O seletor mostra nome, cidade e etapa — nunca só o ID.</p>',
+                    unsafe_allow_html=True,
+                )
+                rotulo_excluir = st.selectbox(
+                    "Excluir lead", ["Selecione..."] + list(opcoes_empresas.keys()),
+                    key="excluir_lead_select", label_visibility="collapsed",
+                )
+                if rotulo_excluir != "Selecione..." and st.button(
+                    "Excluir", key="abrir_confirmacao_exclusao", use_container_width=True
+                ):
+                    st.session_state["confirmar_exclusao_lead_id"] = opcoes_empresas[rotulo_excluir]
+                    st.rerun()
+
+        _lead_id_para_excluir = st.session_state.get("confirmar_exclusao_lead_id")
+        if _lead_id_para_excluir:
+            _linha_alvo = base[base["id"] == _lead_id_para_excluir]
+            if _linha_alvo.empty:
+                st.session_state["confirmar_exclusao_lead_id"] = None
+            else:
+                _linha_alvo = _linha_alvo.iloc[0]
+                _confirmar_exclusao_lead(
+                    int(_lead_id_para_excluir), _linha_alvo["nome_empresa"], _linha_alvo.get("cidade"), _linha_alvo["status"]
+                )
 
 st.markdown(
     """
@@ -2005,36 +2625,77 @@ st.markdown(
 )
 
 if aba_manual:
-    st.subheader("Nova empresa")
-    with st.form("cadastro_manual", clear_on_submit=True):
+    aviso_nova_empresa = st.session_state.pop("aviso_nova_empresa", None)
+    if aviso_nova_empresa:
+        st.markdown(
+            f'<span class="chip chip-accent" style="font-size:0.78rem;padding:0.35rem 0.7rem;">{aviso_nova_empresa}</span>',
+            unsafe_allow_html=True,
+        )
+
+    # As chaves dos campos levam um sufixo de "versão" que só muda após um
+    # cadastro bem-sucedido: popar st.session_state de um text_input dentro de
+    # um form não garante, na prática, que o widget volte a ficar vazio (o
+    # Streamlit pode preservar o valor já digitado). Trocar a chave força o
+    # widget a nascer de novo, sem estado anterior.
+    _versao_form_nova = st.session_state.get("versao_form_nova_empresa", 0)
+
+    def _campo_nova(nome_campo: str) -> str:
+        return f"novo_empresa_{nome_campo}_{_versao_form_nova}"
+
+    _erro_nome = st.session_state.get("erro_novo_empresa_nome", False)
+    _erro_nicho = st.session_state.get("erro_novo_empresa_nicho", False)
+    if _erro_nome or _erro_nicho:
+        _seletores_erro = []
+        if _erro_nome:
+            _seletores_erro.append(f".st-key-{_campo_nova('nome')} input")
+        if _erro_nicho:
+            _seletores_erro.append(f".st-key-{_campo_nova('nicho')} input")
+        st.markdown(
+            f"<style>{', '.join(_seletores_erro)} {{ border-color: rgba(255,107,107,.55) !important; }}</style>",
+            unsafe_allow_html=True,
+        )
+
+    with st.form(f"cadastro_manual_{_versao_form_nova}", clear_on_submit=False):
         c1, c2 = st.columns(2)
-        nome = c1.text_input("Empresa *")
-        razao_social = c2.text_input("Razão social")
-        nicho = c1.text_input("Nicho *")
-        cnpj_manual = c2.text_input("CNPJ")
-        decisor = c1.text_input("Contato/decisor")
-        cidade = c2.text_input("Cidade")
-        endereco = c1.text_input("Endereço")
-        telefone = c1.text_input("Telefone")
-        email = c2.text_input("E-mail")
-        site = c1.text_input("Site")
+        nome = c1.text_input("Empresa *", key=_campo_nova("nome"))
+        if _erro_nome:
+            c1.markdown('<div style="font-size:0.72rem;color:#ff8f8f;margin-top:-0.6rem;">Obrigatório para salvar o registro.</div>', unsafe_allow_html=True)
+        razao_social = c2.text_input("Razão social", key=_campo_nova("razao"))
+        nicho = c1.text_input("Nicho *", key=_campo_nova("nicho"))
+        if _erro_nicho:
+            c1.markdown('<div style="font-size:0.72rem;color:#ff8f8f;margin-top:-0.6rem;">Obrigatório — define a fonte de prospecção.</div>', unsafe_allow_html=True)
+        cnpj_manual = c2.text_input("CNPJ", key=_campo_nova("cnpj"))
+        decisor = c1.text_input("Contato/decisor", key=_campo_nova("decisor"))
+        cidade = c2.text_input("Cidade", key=_campo_nova("cidade"))
+        endereco = c1.text_input("Endereço", key=_campo_nova("endereco"))
+        telefone = c1.text_input("Telefone", key=_campo_nova("telefone"))
+        email = c2.text_input("E-mail", key=_campo_nova("email"))
+        site = c1.text_input("Site", key=_campo_nova("site"))
         c1, c2 = st.columns(2)
-        valor_proposta_manual = c2.number_input("Valor da Proposta (R$)", min_value=0.0, value=0.0, format="%.2f")
-        status_manual = c1.selectbox("Status", STATUS)
-        proximo_contato_manual = c1.date_input("Próximo Contato", value=None)
+        valor_proposta_manual = c2.number_input(
+            "Valor da Proposta (R$)", min_value=0.0, value=0.0, format="%.2f", key=_campo_nova("valor")
+        )
+        status_manual = c1.selectbox("Status", STATUS, key=_campo_nova("status"))
+        proximo_contato_manual = c1.date_input("Próximo Contato", value=None, key=_campo_nova("proximo"))
         segmento_icp_manual = c2.selectbox(
             "Segmento ICP (opcional)",
             options=[""] + list(PERFIS_ICP.keys()),
-            help="Se deixado em branco, será classificado automaticamente."
+            help="Se deixado em branco, será classificado automaticamente.",
+            key=_campo_nova("icp"),
         )
-        observacoes = st.text_area("Observações")
+        observacoes = st.text_area("Observações", key=_campo_nova("obs"))
         enviar = st.form_submit_button("Cadastrar lead", type="primary", width="stretch")
+
     if enviar:
         if not nome.strip() or not nicho.strip():
-            st.warning("Empresa e nicho são obrigatórios.")
+            st.session_state["erro_novo_empresa_nome"] = not nome.strip()
+            st.session_state["erro_novo_empresa_nicho"] = not nicho.strip()
+            st.rerun()
         elif cnpj_manual.strip() and not cnpj_valido(cnpj_manual):
             st.warning("O CNPJ informado é inválido.")
         else:
+            st.session_state.pop("erro_novo_empresa_nome", None)
+            st.session_state.pop("erro_novo_empresa_nicho", None)
             lead = {
                 "place_id": None, "cnpj": limpar_cnpj(cnpj_manual), "segmento_icp": segmento_icp_manual,
                 "nome_empresa": nome.strip(), "razao_social": razao_social.strip(),
@@ -2046,4 +2707,8 @@ if aba_manual:
             inseridos, _ = salvar_leads([enriquecer_lead_icp(lead)])
             if inseridos:
                 st.cache_data.clear()
-            st.success("Lead cadastrado." if inseridos else "Esse lead já existe na base.")
+                st.session_state["versao_form_nova_empresa"] = _versao_form_nova + 1
+                st.session_state["aviso_nova_empresa"] = f"Cadastrada e enviada a {status_manual}"
+                st.rerun()
+            else:
+                st.warning("Esse lead já existe na base.")
