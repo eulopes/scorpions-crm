@@ -2602,7 +2602,8 @@ if aba_base:
                         inseridos, duplicados = salvar_leads([empresa_consultada])
                         if inseridos:
                             st.cache_data.clear()
-                            st.success("Empresa adicionada ao pipeline.")
+                            st.session_state["aviso_empresa"] = "Empresa adicionada ao pipeline."
+                            st.rerun()
                         elif duplicados:
                             st.info("Essa empresa já está cadastrada na base.")
 
