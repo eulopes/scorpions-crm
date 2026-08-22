@@ -89,6 +89,30 @@ PADRAO_CNPJ = re.compile(r"(?<!\d)\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}(?!\d)")
 LIMITE_PAGINA_BYTES = 5_000_000
 STATUS = STATUS_FUNIL
 
+# Rótulos compartilhados para as tabelas de resultado de prospecção (busca
+# automática e extração por URL) — sem isso o st.dataframe mostra os nomes
+# crus das colunas (nome_empresa, segmento_icp...) em vez de rótulos legíveis.
+COLUNAS_LEAD_LABELS: dict[str, Any] = {
+    "nome_empresa": "Empresa",
+    "razao_social": "Razão social",
+    "cnpj": "CNPJ",
+    "decisor": "Decisor",
+    "nicho": "Nicho",
+    "endereco": "Endereço",
+    "cidade": "Cidade",
+    "telefone": "Telefone",
+    "site": "Site",
+    "email": "E-mail",
+    "status": "Etapa",
+    "status_receita": "Situação (Receita)",
+    "origem": "Origem",
+    "observacoes": "Observações",
+    "pontuacao": "Score",
+    "motivo_qualificacao": "Motivo da qualificação",
+    "segmento_icp": "Segmento ICP",
+    "servicos_recomendados": "Serviços recomendados",
+}
+
 
 def configurar_google_places() -> bool:
     """Carrega a chave do Google Places sem expô-la na interface ou nos logs."""
@@ -1404,7 +1428,14 @@ st.markdown(
 
       .stAlert {
         border-radius: 4px;
+        background: var(--panel) !important;
+        border: 1px solid var(--line) !important;
       }
+      .stAlert p { color: var(--text-secondary) !important; }
+      div[data-testid="stAlertContentInfo"] svg { color: var(--primary) !important; }
+      div[data-testid="stAlertContentSuccess"] svg { color: var(--primary) !important; }
+      div[data-testid="stAlertContentWarning"] svg { color: #caa86a !important; }
+      div[data-testid="stAlertContentError"] svg { color: var(--danger) !important; }
 
       .soft-badge {
                 font-family: Orbitron, Inter, sans-serif;
@@ -2129,8 +2160,18 @@ if aba_funil:
         with cols[i]:
             leads_na_etapa = dados_funil[dados_funil["status"] == etapa]
             total_valor_etapa = leads_na_etapa['valor_proposta'].sum()
-            st.subheader(f"{etapa} ({len(leads_na_etapa)})", divider="blue")
-            st.caption(f"Valor em propostas: R$ {total_valor_etapa:,.2f}")
+            _dot_cor = "#5A6373" if i == 0 else ("#7DD3FC" if i == len(etapas_kanban) - 1 else "#2568FF")
+            st.markdown(
+                f"""
+                <div style="display:flex;align-items:center;gap:8px;padding-bottom:8px;border-bottom:1px solid #1E232B;margin-bottom:4px;">
+                  <span style="width:6px;height:6px;flex:none;border-radius:50%;background:{_dot_cor};"></span>
+                  <span style="font-size:0.76rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#F5F7FA;flex:1;min-width:0;">{etapa}</span>
+                  <span style="font-family:Orbitron,sans-serif;font-size:0.72rem;color:#8A94A6;">{len(leads_na_etapa)}</span>
+                </div>
+                <div style="font-size:0.7rem;color:#5A6373;margin-bottom:0.8rem;">R$ {total_valor_etapa:,.2f} em propostas</div>
+                """,
+                unsafe_allow_html=True,
+            )
             if leads_na_etapa.empty:
                 st.markdown(
                     '<div class="dashed-empty" style="padding:1.1rem 0.9rem;">'
@@ -2311,7 +2352,12 @@ if aba_prospeccao:
             columns=["place_id", *colunas_internas], errors="ignore"
         )
 
-        st.dataframe(tabela_resultados[colunas_disponiveis], width="stretch", hide_index=True)
+        st.dataframe(
+            tabela_resultados[colunas_disponiveis],
+            width="stretch",
+            hide_index=True,
+            column_config=COLUNAS_LEAD_LABELS,
+        )
         if st.button("Adicionar resultados à base"):
             inseridos, duplicados = salvar_leads(resultados)
             st.success(f"{inseridos} lead(s) adicionado(s). {duplicados} duplicado(s) ignorado(s).")
@@ -2433,6 +2479,14 @@ if aba_automacao:
             for indice_campanha, campanha in enumerate(campanhas_atuais):
                 ativa = bool(campanha.get("ativa"))
                 chip_classe = "chip-accent" if ativa else "chip-neutral"
+                _ultima_execucao_raw = campanha.get("ultima_execucao")
+                if _ultima_execucao_raw:
+                    try:
+                        _ultima_execucao_fmt = pd.to_datetime(_ultima_execucao_raw, utc=True).strftime("%d/%m %H:%M")
+                    except (ValueError, TypeError):
+                        _ultima_execucao_fmt = str(_ultima_execucao_raw)
+                else:
+                    _ultima_execucao_fmt = "nunca"
                 with colunas_campanhas[indice_campanha % len(colunas_campanhas)]:
                     st.markdown(
                         f"""
@@ -2445,7 +2499,7 @@ if aba_automacao:
                           <div class="metrics">
                             <div><div class="m-label">Limite/dia</div><div class="m-val">{campanha.get('limite_diario')}</div></div>
                             <div><div class="m-label">Horário</div><div class="m-val">{campanha.get('horario')}</div></div>
-                            <div><div class="m-label">Última</div><div class="m-val" style="font-family:Inter,sans-serif;font-size:0.78rem;">{campanha.get('ultima_execucao') or 'nunca'}</div></div>
+                            <div><div class="m-label">Última</div><div class="m-val" style="font-family:Inter,sans-serif;font-size:0.78rem;">{_ultima_execucao_fmt}</div></div>
                           </div>
                         </div>
                         """,
@@ -2492,12 +2546,25 @@ if aba_automacao:
         execucoes = listar_execucoes(20)
         if execucoes:
             st.subheader("Histórico de execuções")
+            tabela_execucoes = pd.DataFrame(execucoes)
+            tabela_execucoes["inicio_em"] = pd.to_datetime(
+                tabela_execucoes["inicio_em"], errors="coerce", utc=True
+            ).dt.strftime("%d/%m/%Y %H:%M")
             st.dataframe(
-                pd.DataFrame(execucoes)[
+                tabela_execucoes[
                     ["inicio_em", "campanha_nome", "status", "encontrados", "inseridos", "duplicados", "mensagem"]
                 ],
                 width="stretch",
                 hide_index=True,
+                column_config={
+                    "inicio_em": st.column_config.TextColumn("Início"),
+                    "campanha_nome": st.column_config.TextColumn("Campanha"),
+                    "status": st.column_config.TextColumn("Status"),
+                    "encontrados": st.column_config.NumberColumn("Encontrados", format="%d"),
+                    "inseridos": st.column_config.NumberColumn("Inseridos", format="%d"),
+                    "duplicados": st.column_config.NumberColumn("Duplicados", format="%d"),
+                    "mensagem": st.column_config.TextColumn("Mensagem"),
+                },
             )
 
     with tab_motor_continuo:
@@ -2558,6 +2625,14 @@ if aba_automacao:
                 ],
                 width="stretch",
                 hide_index=True,
+                column_config={
+                    "id": st.column_config.NumberColumn("ID", width="small"),
+                    "nome": st.column_config.TextColumn("Nome"),
+                    "nicho": st.column_config.TextColumn("Nicho"),
+                    "localizacao": st.column_config.TextColumn("Município, UF"),
+                    "ativa": st.column_config.TextColumn("Ativo"),
+                    "criado_em": st.column_config.TextColumn("Criado em"),
+                },
             )
 
             if _pode_gerenciar_campanhas:
@@ -2613,7 +2688,9 @@ if aba_automacao:
             tabela_robo = pd.DataFrame(resultados_robo).drop(columns=["place_id"], errors="ignore")
             if "cnpj" in tabela_robo:
                 tabela_robo["cnpj"] = tabela_robo["cnpj"].map(formatar_cnpj)
-            st.dataframe(tabela_robo, width="stretch", hide_index=True)
+            st.dataframe(
+                tabela_robo, width="stretch", hide_index=True, column_config=COLUNAS_LEAD_LABELS
+            )
             if st.button("Salvar leads ativos na base", key="salvar_resultados_robo"):
                 inseridos, duplicados = salvar_leads(resultados_robo)
                 st.success(f"{inseridos} lead(s) salvo(s). {duplicados} duplicado(s) ignorado(s).")
@@ -2656,6 +2733,10 @@ if aba_base:
     filtro_nicho = f2.selectbox("Filtrar nicho", nichos)
     filtro_status = f3.selectbox("Filtrar status", ["Todos"] + STATUS)
     base = leads_visiveis(termo, filtro_nicho, filtro_status)
+    if "proximo_contato" in base.columns:
+        # Sem isso, células sem data mostram o texto literal "None" em vez de
+        # ficarem em branco — DateColumn só reconhece NaT como vazio.
+        base["proximo_contato"] = pd.to_datetime(base["proximo_contato"], errors="coerce")
 
     if base.empty:
         st.markdown(
