@@ -1099,22 +1099,22 @@ st.markdown(
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;600;700;800&display=swap');
 
       :root {
-                --bg: #0A0A0F;
-                --panel: #111319;
-                --panel-strong: #0C0E13;
-                --line: #1E232B;
+                --bg: #07090D;
+                --panel: #0D1118;
+                --panel-strong: #0A0C11;
+                --line: #1C2735;
                 --line-strong: #2D333D;
-                --text: #F5F7FA;
+                --text: #F4F7FB;
                 --text-secondary: #C3CBD8;
-                --muted: #8A94A6;
+                --muted: #7F8B9B;
                 --weak: #5A6373;
-                --primary: #7DD3FC;
+                --primary: #70D3FC;
                 --secondary: #2568FF;
                 --accent: #0D6EFD;
-                --danger: #ff8f8f;
+                --danger: #FF667D;
                 --danger-strong: #ffb3b3;
-                --success: #7DD3FC;
-                --warning: #ff8f8f;
+                --success: #35D07F;
+                --warning: #F3C75F;
       }
 
       html, body, .stApp, [class*="css"] { font-family: Inter, system-ui, sans-serif; }

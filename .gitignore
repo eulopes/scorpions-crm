@@ -25,3 +25,10 @@ scorpions_base_legacy_backup.db
 # Arquivos de IDE / SO
 .vscode/settings.json
 Thumbs.db
+.mcp.json
+
+# Node (script standalone de automação de navegador)
+node_modules/
+package.json
+package-lock.json
+.playwright-mcp/
