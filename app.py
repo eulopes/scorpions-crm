@@ -1652,7 +1652,7 @@ if aba_prospeccao:
     c1, c2, c3 = st.columns([2, 2, 1])
     nicho_busca = c1.text_input(
         "Nicho ou segmento",
-        placeholder="Ex.: cooperativa de crédito; deixe vazio para todos",
+        placeholder="Ex.: cooperativa de crédito (obrigatório, exceto na fonte Bacen)",
         max_chars=120,
     )
     local_busca = c2.text_input(
