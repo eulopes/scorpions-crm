@@ -725,45 +725,65 @@ def buscar_google_places(nicho: str, localizacao: str, limite: int) -> list[dict
         "X-Goog-Api-Key": chave,
         "X-Goog-FieldMask": (
             "places.id,places.displayName,places.formattedAddress,"
-            "places.nationalPhoneNumber,places.websiteUri,places.types"
+            "places.nationalPhoneNumber,places.websiteUri,places.types,nextPageToken"
         ),
     }
-    resposta = requests.post(
-        GOOGLE_PLACES_URL,
-        headers=headers,
-        json={"textQuery": f"{nicho} em {localizacao}", "pageSize": min(limite, 100)},
-        timeout=25,
-    )
-    if not resposta.ok:
-        try:
-            detalhe = resposta.json().get("error", {}).get("message", "")
-        except ValueError:
-            detalhe = ""
-        if resposta.status_code in {401, 403}:
-            raise RuntimeError("A chave do Google Places foi rejeitada ou não tem a API habilitada.")
-        if resposta.status_code == 429:
-            raise RuntimeError("O limite do Google Places foi atingido. Tente novamente mais tarde.")
-        raise RuntimeError(
-            f"Não foi possível consultar o Google Places agora. {detalhe}".strip()
-        )
+    limite = min(limite, 100)
+    leads: list[dict[str, Any]] = []
+    token: str | None = None
 
-    leads = []
-    for item in resposta.json().get("places", []):
-        leads.append(
-            {
-                "place_id": item.get("id", ""),
-                "nome_empresa": item.get("displayName", {}).get("text", "Sem nome"),
-                "nicho": nicho,
-                "endereco": item.get("formattedAddress", ""),
-                "cidade": localizacao,
-                "telefone": item.get("nationalPhoneNumber", ""),
-                "site": item.get("websiteUri", ""),
-                "email": "",
-                "status": "Novos Leads",
-                "origem": "Google Places",
-                "observacoes": "",
-            }
+    # A API do Google limita pageSize a 20 por chamada; para atender pedidos
+    # maiores é preciso paginar via nextPageToken (mesma lógica do worker em
+    # automation.py), senão o restante dos resultados solicitados é perdido.
+    while len(leads) < limite:
+        corpo: dict[str, Any] = {
+            "textQuery": f"{nicho} em {localizacao}",
+            "pageSize": min(20, limite - len(leads)),
+        }
+        if token:
+            corpo["pageToken"] = token
+        resposta = requests.post(
+            GOOGLE_PLACES_URL,
+            headers=headers,
+            json=corpo,
+            timeout=25,
         )
+        if not resposta.ok:
+            try:
+                detalhe = resposta.json().get("error", {}).get("message", "")
+            except ValueError:
+                detalhe = ""
+            if resposta.status_code in {401, 403}:
+                raise RuntimeError("A chave do Google Places foi rejeitada ou não tem a API habilitada.")
+            if resposta.status_code == 429:
+                raise RuntimeError("O limite do Google Places foi atingido. Tente novamente mais tarde.")
+            raise RuntimeError(
+                f"Não foi possível consultar o Google Places agora. {detalhe}".strip()
+            )
+
+        dados = resposta.json()
+        for item in dados.get("places", []):
+            leads.append(
+                {
+                    "place_id": item.get("id", ""),
+                    "nome_empresa": item.get("displayName", {}).get("text", "Sem nome"),
+                    "nicho": nicho,
+                    "endereco": item.get("formattedAddress", ""),
+                    "cidade": localizacao,
+                    "telefone": item.get("nationalPhoneNumber", ""),
+                    "site": item.get("websiteUri", ""),
+                    "email": "",
+                    "status": "Novos Leads",
+                    "origem": "Google Places",
+                    "observacoes": "",
+                }
+            )
+            if len(leads) >= limite:
+                break
+        token = dados.get("nextPageToken")
+        if not token or len(leads) >= limite:
+            break
+        time.sleep(1)
     return leads
 
 
