@@ -19,6 +19,8 @@ import ipaddress
 import json
 import re
 import sqlite3
+import subprocess
+import sys
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -183,6 +185,18 @@ def carregar_tema_css() -> str:
     """Lê theme.css uma única vez por processo. Editar esse arquivo e reiniciar
     o Streamlit (ou limpar o cache) já reflete no visual, sem tocar em app.py."""
     return (APP_DIR / "theme.css").read_text(encoding="utf-8")
+
+
+@st.cache_resource
+def _iniciar_worker_em_background() -> int:
+    """Sobe worker.py como subprocesso, uma única vez por processo do Streamlit.
+
+    Hospedagens como o Railway só rodam um comando por serviço e não repassam
+    processos em segundo plano iniciados via '&' no Procfile — por isso o worker
+    precisa ser filho do próprio processo Python do app, não do shell que o inicia.
+    """
+    processo = subprocess.Popen([sys.executable, str(APP_DIR / "worker.py")])
+    return processo.pid
 
 
 def exigir_login() -> None:
@@ -1113,6 +1127,7 @@ st.markdown(f"<style>{carregar_tema_css()}</style>", unsafe_allow_html=True)
 iniciar_banco()
 iniciar_banco_automacao()
 iniciar_banco_usuarios()
+_iniciar_worker_em_background()
 
 exigir_login()
 
