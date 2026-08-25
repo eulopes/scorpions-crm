@@ -418,6 +418,8 @@ def listar_equipes() -> list[dict[str, Any]]:
 def criar_usuario(
     username: str, senha: str, nome: str, nivel: str, equipe_id: int | None, email: str = ""
 ) -> int:
+    if not pode(st.session_state.get("nivel_usuario"), "pode_criar_usuario"):
+        raise PermissionError("Sem permissão para criar usuários.")
     if not username.strip() or not senha or not nome.strip():
         raise ValueError("Usuário, senha e nome são obrigatórios.")
     if not nivel_valido(nivel):
@@ -462,14 +464,34 @@ def listar_usuarios(equipe_id: int | None = None, niveis: tuple[str, ...] | None
 
 
 def alternar_status_usuario(usuario_id: int) -> str:
+    if usuario_id == st.session_state.get("usuario_id"):
+        raise PermissionError("Não é possível alternar o próprio status.")
+    niveis_permitidos = niveis_administraveis_por(st.session_state.get("nivel_usuario"))
     with conectar() as conexao:
-        linha = conexao.execute("SELECT status FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
-        novo_status = "inativo" if linha and linha["status"] == "ativo" else "ativo"
+        linha = conexao.execute("SELECT status, nivel FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
+        if not linha or linha["nivel"] not in niveis_permitidos:
+            raise PermissionError("Sem permissão para alternar o status desse usuário.")
+        novo_status = "inativo" if linha["status"] == "ativo" else "ativo"
         conexao.execute("UPDATE usuarios SET status = ? WHERE id = ?", (novo_status, usuario_id))
     return novo_status
 
 
 def atribuir_lead_a_usuario(lead_id: int, usuario_id: int | None) -> None:
+    escopo = pode(st.session_state.get("nivel_usuario"), "escopo_atribuicao_carteira")
+    if not escopo:
+        raise PermissionError("Sem permissão para atribuir carteira.")
+    if usuario_id is not None:
+        niveis_alvo = ("vendedor", "supervisor") if escopo == "todas" else ("vendedor",)
+        with conectar() as conexao:
+            alvo = conexao.execute(
+                "SELECT nivel, equipe_id FROM usuarios WHERE id = ?", (usuario_id,)
+            ).fetchone()
+        dentro_da_equipe = escopo == "todas" or (
+            alvo and alvo["equipe_id"] == st.session_state.get("equipe_id_usuario")
+        )
+        if not alvo or alvo["nivel"] not in niveis_alvo or not dentro_da_equipe:
+            raise PermissionError("Esse usuário está fora do seu escopo de atribuição.")
+
     agora = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with conectar() as conexao:
         conexao.execute(

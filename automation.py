@@ -1457,6 +1457,12 @@ def _buscar_google_places(campanha: dict[str, Any]) -> list[dict[str, Any]]:
                 detalhe = resposta.json().get("error", {}).get("message", resposta.text)
             except ValueError:
                 detalhe = resposta.text
+            if resposta.status_code in {401, 403}:
+                raise RuntimeError(
+                    "A chave do Google Places foi rejeitada ou não tem a API habilitada. "
+                    "Confira a variável GOOGLE_PLACES_API_KEY no ambiente onde este processo "
+                    "está rodando (ela é lida do sistema operacional, não do secrets.toml)."
+                )
             raise RuntimeError(f"Google Places respondeu {resposta.status_code}: {detalhe}")
 
         dados = resposta.json()
