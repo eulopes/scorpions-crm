@@ -1,3 +1,13 @@
+[server]
+enableXsrfProtection = true
+# CUIDADO: 'false' aqui faz o OPOSTO do que parece -- desliga a proteção de
+# CORS do Streamlit (o próprio Streamlit avisa isso no log ao iniciar).
+# 'true' é o valor que restringe origem cruzada.
+enableCORS = true
+# Para travar por hostname também (além de CORS), defina server.allowedHosts
+# com o domínio real de produção -- não hardcodeei aqui pra não arriscar
+# derrubar o acesso se o domínio mudar.
+
 [client]
 toolbarMode = "minimal"
 showSidebarNavigation = false
