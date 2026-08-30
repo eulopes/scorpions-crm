@@ -60,6 +60,7 @@ from niche_sources import (
 
 from automation import (
     FONTE_AUTOMATICA,
+    FONTE_MOTOR_CONTINUO,
     FONTE_OSM,
     FONTES_AUTOMACAO,
     LIMIAR_QUALIFICACAO,
@@ -94,6 +95,10 @@ PADRAO_CNPJ = re.compile(r"(?<!\d)\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}(?!\d)")
 LIMITE_PAGINA_BYTES = 5_000_000
 STATUS = STATUS_FUNIL
 FONTES_AUTOMACAO_UI = tuple(dict.fromkeys(FONTES_AUTOMACAO))
+# "Motor Contínuo (todas as fontes)" só é uma fonte válida para campanhas
+# agendadas (usa os alvos cadastrados) -- buscar_leads_por_fonte não sabe
+# tratá-la, então ela não pode aparecer no seletor de busca manual.
+FONTES_PROSPECCAO_MANUAL = tuple(f for f in FONTES_AUTOMACAO_UI if f != FONTE_MOTOR_CONTINUO)
 
 # Rótulos compartilhados para as tabelas de resultado de prospecção (busca
 # automática e extração por URL) — sem isso o st.dataframe mostra os nomes
@@ -2213,7 +2218,7 @@ if aba_prospeccao:
 
     fonte_busca = st.selectbox(
         "Fonte",
-        FONTES_AUTOMACAO_UI,
+        FONTES_PROSPECCAO_MANUAL,
         help=(
             "No modo automático, o nicho define a fonte e apenas candidatos com "
             "localização, algum contato e situação ativa quando a fonte permite confirmá-la "

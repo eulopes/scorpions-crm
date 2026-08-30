@@ -72,8 +72,8 @@ FONTE_AUTOMATICA = "Automático por nicho"
 FONTE_CVM = "CVM - Corretoras"
 FONTE_B3 = "B3 - Empresas listadas"
 FONTE_OSM = "OpenStreetMap"
+FONTE_MOTOR_CONTINUO = "Motor Contínuo (todas as fontes)"
 FONTES_AUTOMACAO = [
- FONTE_AUTOMATICA,
     FONTE_AUTOMATICA,
     "Bacen",
     FONTE_CVM,
@@ -81,7 +81,7 @@ FONTES_AUTOMACAO = [
     FONTE_OSM,
     "Google Places",
     "Demonstração",
- "Motor Contínuo (todas as fontes)",
+    FONTE_MOTOR_CONTINUO,
 ]
 LIMITE_MAXIMO = 100
 LIMIAR_QUALIFICACAO = 70
@@ -432,7 +432,7 @@ def criar_campanha(
     nicho = nicho.strip()
     localizacao = localizacao.strip()
     # A fonte "Motor Contínuo" não exige nicho/localização na campanha, pois usa os alvos cadastrados.
-    if not nome or (fonte != "Motor Contínuo (todas as fontes)" and (not nicho or not localizacao)):
+    if not nome or (fonte != FONTE_MOTOR_CONTINUO and (not nicho or not localizacao)):
         raise ValueError("Nome, nicho e localização são obrigatórios.")
     if fonte not in FONTES_AUTOMACAO:
         raise ValueError("Fonte de automação inválida.")
@@ -2101,7 +2101,7 @@ def executar_campanha(campanha_id: int) -> dict[str, Any]:
                 int(campanha["limite_diario"]),
                 campanha["nome"],
             )
-        elif campanha["fonte"] == "Motor Contínuo (todas as fontes)":
+        elif campanha["fonte"] == FONTE_MOTOR_CONTINUO:
             leads = buscar_leads_motor_continuo(campanha)
         else:
             leads = buscar_leads_por_fonte(
