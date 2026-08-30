@@ -419,6 +419,115 @@ def iniciar_banco_automacao() -> None:
         )
         conexao.execute("CREATE INDEX IF NOT EXISTS idx_alvos_continuos_ativa ON alvos_continuos(ativa)")
 
+        conexao.execute(
+            """
+            CREATE TABLE IF NOT EXISTS lista_supressao_contato (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telefone TEXT NOT NULL UNIQUE,
+                motivo TEXT,
+                usuario TEXT,
+                criado_em TEXT NOT NULL
+            )
+            """
+        )
+        conexao.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mensagens_enviadas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lead_id INTEGER,
+                telefone TEXT NOT NULL,
+                mensagem TEXT NOT NULL,
+                usuario TEXT NOT NULL,
+                criado_em TEXT NOT NULL,
+                FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE SET NULL
+            )
+            """
+        )
+        conexao.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mensagens_enviadas_lead ON mensagens_enviadas(lead_id, criado_em DESC)"
+        )
+
+
+def _normalizar_telefone(telefone: str) -> str:
+    """Mantém só os dígitos — chave canônica pra supressão e pro link do
+    WhatsApp, independente de como o telefone foi digitado/formatado."""
+    return "".join(filter(str.isdigit, str(telefone or "")))
+
+
+def telefone_suprimido(telefone: str) -> bool:
+    digitos = _normalizar_telefone(telefone)
+    if not digitos:
+        return False
+    with conectar() as conexao:
+        linha = conexao.execute(
+            "SELECT 1 FROM lista_supressao_contato WHERE telefone = ?", (digitos,)
+        ).fetchone()
+    return linha is not None
+
+
+def adicionar_supressao(telefone: str, motivo: str, usuario: str) -> None:
+    digitos = _normalizar_telefone(telefone)
+    if not digitos:
+        raise ValueError("Telefone inválido.")
+    agora = iso_utc()
+    with conectar() as conexao:
+        conexao.execute(
+            "INSERT INTO lista_supressao_contato (telefone, motivo, usuario, criado_em) "
+            "VALUES (?, ?, ?, ?) ON CONFLICT(telefone) DO UPDATE SET motivo = excluded.motivo",
+            (digitos, motivo.strip() or None, usuario, agora),
+        )
+
+
+def remover_supressao(telefone: str) -> None:
+    digitos = _normalizar_telefone(telefone)
+    with conectar() as conexao:
+        conexao.execute("DELETE FROM lista_supressao_contato WHERE telefone = ?", (digitos,))
+
+
+def listar_supressao(limite: int = 200) -> list[dict[str, Any]]:
+    with conectar() as conexao:
+        linhas = conexao.execute(
+            "SELECT * FROM lista_supressao_contato ORDER BY criado_em DESC LIMIT ?",
+            (max(1, min(int(limite), 1000)),),
+        ).fetchall()
+    return [dict(linha) for linha in linhas]
+
+
+def registrar_mensagem_enviada(lead_id: int | None, telefone: str, mensagem: str, usuario: str) -> None:
+    agora = iso_utc()
+    with conectar() as conexao:
+        conexao.execute(
+            "INSERT INTO mensagens_enviadas (lead_id, telefone, mensagem, usuario, criado_em) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (lead_id, _normalizar_telefone(telefone), mensagem, usuario, agora),
+        )
+
+
+def leads_ja_contatados_ha_dias(dias: int = 14) -> set[int]:
+    """IDs de lead com mensagem registrada dentro da janela — evita repetir
+    contato com quem já foi abordado recentemente."""
+    limite = (agora_utc() - timedelta(days=dias)).isoformat()
+    with conectar() as conexao:
+        linhas = conexao.execute(
+            "SELECT DISTINCT lead_id FROM mensagens_enviadas WHERE criado_em >= ? AND lead_id IS NOT NULL",
+            (limite,),
+        ).fetchall()
+    return {int(linha["lead_id"]) for linha in linhas}
+
+
+def gerar_link_whatsapp(telefone: str, mensagem: str) -> str | None:
+    """Monta o link wa.me pronto -- quem manda é a pessoa, clicando; nada
+    aqui dispara mensagem sozinho. Assume DDI 55 (Brasil) quando o número
+    não já vem com código de país (11 dígitos = DDD + número)."""
+    digitos = _normalizar_telefone(telefone)
+    if len(digitos) < 10:
+        return None
+    if len(digitos) <= 11:
+        digitos = "55" + digitos
+    from urllib.parse import quote
+    return f"https://wa.me/{digitos}?text={quote(mensagem)}"
+
+
 def criar_campanha(
     nome: str,
     nicho: str,
@@ -602,6 +711,27 @@ def atualizar_heartbeat() -> None:
             ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor, atualizado_em = excluded.atualizado_em
             """,
             (agora,),
+        )
+
+
+def ler_config(chave: str, padrao: str = "") -> str:
+    """Le um valor simples de estado_automacao (mesma tabela do heartbeat) --
+    reaproveitada aqui como key/value store genérico, ex.: modelo de
+    mensagem de contato salvo por um usuário."""
+    with conectar() as conexao:
+        linha = conexao.execute(
+            "SELECT valor FROM estado_automacao WHERE chave = ?", (chave,)
+        ).fetchone()
+    return linha["valor"] if linha and linha["valor"] is not None else padrao
+
+
+def salvar_config(chave: str, valor: str) -> None:
+    agora = iso_utc()
+    with conectar() as conexao:
+        conexao.execute(
+            "INSERT INTO estado_automacao (chave, valor, atualizado_em) VALUES (?, ?, ?) "
+            "ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor, atualizado_em = excluded.atualizado_em",
+            (chave, valor, agora),
         )
 
 

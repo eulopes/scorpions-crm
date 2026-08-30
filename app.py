@@ -84,6 +84,15 @@ from automation import (
     excluir_alvo_continuo,
     salvar_leads_no_banco,
     status_worker,
+    ler_config,
+    salvar_config,
+    telefone_suprimido,
+    adicionar_supressao,
+    remover_supressao,
+    listar_supressao,
+    registrar_mensagem_enviada,
+    leads_ja_contatados_ha_dias,
+    gerar_link_whatsapp,
 )
 
 
@@ -1585,6 +1594,7 @@ with st.sidebar:
         "Pipeline": None,
         "Prospecção": None,
         "Empresas": _total_leads,
+        "Contato": None,
         "Automação": _campanhas_ativas or None,
         "Nova empresa": None,
         "Equipe": None,
@@ -1594,6 +1604,7 @@ with st.sidebar:
         "Pipeline": ":material/view_kanban:  Negócios / Pipeline",
         "Prospecção": ":material/search:  Leads / Prospecção",
         "Empresas": ":material/business:  Clientes / Empresas",
+        "Contato": ":material/chat:  Contato",
         "Automação": ":material/bolt:  Automação",
         "Nova empresa": ":material/add_business:  Nova empresa",
         "Equipe": ":material/groups:  Equipe",
@@ -1606,8 +1617,8 @@ with st.sidebar:
     pagina = st.radio(
         "Navegação",
         list(_paginas_do_nivel),
-        format_func=lambda item: _icones_paginas[item]
-        + (f"  ·  {contadores_nav[item]}" if contadores_nav[item] else ""),
+        format_func=lambda item: _icones_paginas.get(item, item)
+        + (f"  ·  {contadores_nav.get(item)}" if contadores_nav.get(item) else ""),
         label_visibility="collapsed",
         key="navegacao_principal",
     )
@@ -1636,6 +1647,7 @@ aba_dashboard = pagina == "Visão geral"
 aba_funil = pagina == "Pipeline"
 aba_prospeccao = pagina == "Prospecção"
 aba_cnpj = pagina == "Empresas"
+aba_contato = pagina == "Contato"
 aba_automacao = pagina == "Automação"
 aba_base = pagina == "Empresas"
 aba_manual = pagina == "Nova empresa"
@@ -1677,6 +1689,11 @@ elif aba_cnpj:
     if _acao_header:
         st.session_state["navegacao_solicitada"] = "Nova empresa"
         st.rerun()
+elif aba_contato:
+    render_page_header(
+        "Contato",
+        "Mensagens de WhatsApp assistidas — você confere e envia, o sistema não dispara nada sozinho.",
+    )
 elif aba_automacao:
     _acoes_automacao = [("+ Nova campanha", "hdr_nova_campanha", True)] if _pode_gerenciar_campanhas else None
     _acao_header = render_page_header(
@@ -2921,6 +2938,118 @@ if aba_base:
                 _confirmar_exclusao_lead(
                     int(_lead_id_para_excluir), _linha_alvo["nome_empresa"], _linha_alvo.get("cidade"), _linha_alvo["status"]
                 )
+
+if aba_contato:
+    st.info(
+        "Isso só gera o link do WhatsApp já com a mensagem preenchida — "
+        "você confere e clica pra enviar. Nada é disparado automaticamente. "
+        "Nem todo telefone comercial tem WhatsApp (muitos são fixos); confirme antes de mandar."
+    )
+
+    _modelo_padrao = (
+        "Olá! Sou da Scorpions e ajudamos empresas como a {empresa} a crescer. "
+        "Podemos conversar rapidinho sobre como podemos ajudar? "
+        "Se preferir não receber mais contatos, é só responder SAIR."
+    )
+    _modelo_atual = ler_config("modelo_mensagem_whatsapp", _modelo_padrao)
+    with st.expander("Modelo de mensagem", icon=":material/edit_note:"):
+        st.caption("Use {empresa}, {cidade}, {nicho} e {decisor} — são preenchidos por lead.")
+        _novo_modelo = st.text_area("Mensagem", value=_modelo_atual, height=120, key="modelo_mensagem_input")
+        if st.button("Salvar modelo", key="salvar_modelo_mensagem"):
+            salvar_config("modelo_mensagem_whatsapp", _novo_modelo)
+            st.toast("Modelo salvo.", icon=":material/check_circle:")
+            st.rerun()
+
+    _base_contato = leads_visiveis()
+    _contatados_recentes = leads_ja_contatados_ha_dias(14)
+    _elegiveis = []
+    for _, _linha in _base_contato.iterrows():
+        _telefone = str(_linha.get("telefone") or "").strip()
+        if not _telefone:
+            continue
+        if int(_linha["id"]) in _contatados_recentes:
+            continue
+        if telefone_suprimido(_telefone):
+            continue
+        _elegiveis.append(_linha)
+
+    st.markdown(
+        f'<div class="section-title" style="margin-top:0.6rem;">'
+        f'Próximos contatos ({min(10, len(_elegiveis))} de {len(_elegiveis)} elegíveis)</div>',
+        unsafe_allow_html=True,
+    )
+
+    if not _elegiveis:
+        render_empty_state(
+            "Nenhum lead elegível pra contato agora",
+            "Isso acontece quando não há telefone cadastrado, o lead já foi "
+            "contatado nos últimos 14 dias, ou o número está na lista de supressão.",
+            icone="💬",
+            compacto=True,
+        )
+    else:
+        for _lead_contato in _elegiveis[:10]:
+            _mensagem = _modelo_atual.format(
+                empresa=_lead_contato.get("nome_empresa") or "",
+                cidade=_lead_contato.get("cidade") or "",
+                nicho=_lead_contato.get("nicho") or "",
+                decisor=_lead_contato.get("decisor") or "",
+            )
+            _link = gerar_link_whatsapp(_lead_contato["telefone"], _mensagem)
+            with st.container(key=f"contato_card_{int(_lead_contato['id'])}"):
+                st.markdown(
+                    f"""
+                    <div class="campaign-card">
+                      <div class="head"><div class="name">{escape(str(_lead_contato['nome_empresa']))}</div></div>
+                      <div class="scope">{escape(str(_lead_contato.get('cidade') or '—'))} · {escape(str(_lead_contato.get('telefone') or '—'))}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                st.caption(_mensagem)
+                _col_link, _col_marcar, _col_suprimir = st.columns([1.3, 1, 1])
+                if _link:
+                    _col_link.link_button("Abrir no WhatsApp", _link, width="stretch")
+                else:
+                    _col_link.caption("Telefone inválido para link.")
+                if _col_marcar.button("Marcar como enviado", key=f"marcar_enviado_{_lead_contato['id']}", width="stretch"):
+                    registrar_mensagem_enviada(
+                        int(_lead_contato["id"]), _lead_contato["telefone"], _mensagem,
+                        st.session_state.get("usuario_logado", "sistema"),
+                    )
+                    st.rerun()
+                if _col_suprimir.button("Não contatar mais", key=f"suprimir_{_lead_contato['id']}", width="stretch"):
+                    adicionar_supressao(
+                        _lead_contato["telefone"], "Solicitado pelo lead",
+                        st.session_state.get("usuario_logado", "sistema"),
+                    )
+                    st.rerun()
+
+    with st.expander("Lista de supressão (não contatar)", icon=":material/block:"):
+        _supressoes = listar_supressao()
+        if not _supressoes:
+            st.caption("Nenhum número na lista de supressão ainda.")
+        else:
+            st.dataframe(
+                pd.DataFrame(_supressoes)[["telefone", "motivo", "usuario", "criado_em"]],
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "telefone": st.column_config.TextColumn("Telefone"),
+                    "motivo": st.column_config.TextColumn("Motivo"),
+                    "usuario": st.column_config.TextColumn("Registrado por"),
+                    "criado_em": st.column_config.TextColumn("Quando"),
+                },
+            )
+        _col_add_tel, _col_add_motivo, _col_add_btn = st.columns([1, 2, 1])
+        _tel_supressao = _col_add_tel.text_input("Telefone", key="supressao_tel_input", label_visibility="collapsed", placeholder="Telefone")
+        _motivo_supressao = _col_add_motivo.text_input("Motivo", key="supressao_motivo_input", label_visibility="collapsed", placeholder="Motivo (opcional)")
+        if _col_add_btn.button("Adicionar", key="supressao_add_btn", width="stretch"):
+            if _tel_supressao.strip():
+                adicionar_supressao(_tel_supressao, _motivo_supressao, st.session_state.get("usuario_logado", "sistema"))
+                st.rerun()
+            else:
+                st.warning("Informe um telefone.")
 
 if aba_manual:
     aviso_nova_empresa = st.session_state.pop("aviso_nova_empresa", None)
