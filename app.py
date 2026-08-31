@@ -158,6 +158,9 @@ def configurar_google_places() -> bool:
 MAX_TENTATIVAS_LOGIN = 5
 BLOQUEIO_LOGIN_SEGUNDOS = 60
 SENHA_TAMANHO_MINIMO = 8
+# "123" pedido não passa no mínimo de 8 caracteres (SENHA_TAMANHO_MINIMO) --
+# provisória com o mesmo espírito (fácil de digitar, óbvia que precisa trocar).
+SENHA_PROVISORIA_INICIAL = "trocar123"
 
 
 @st.cache_resource
@@ -697,6 +700,27 @@ def iniciar_banco_usuarios() -> None:
                     """,
                     (username, hash_bcrypt, username.capitalize(), agora),
                 )
+
+        # Contas iniciais pedidas para o time (diretor, acesso total) --
+        # senha provisória, trocada pelo próprio usuário em "Trocar senha"
+        # na barra lateral assim que ele logar pela primeira vez.
+        for username, nome in (
+            ("lopes", "Lopes"), ("moroni", "Moroni"), ("junior", "Junior"),
+        ):
+            existe = conexao.execute(
+                "SELECT 1 FROM usuarios WHERE username = ?", (username,)
+            ).fetchone()
+            if not existe:
+                senha_provisoria_hash = bcrypt.hashpw(
+                    SENHA_PROVISORIA_INICIAL.encode("utf-8"), bcrypt.gensalt()
+                ).decode("utf-8")
+                conexao.execute(
+                    """
+                    INSERT INTO usuarios (username, senha_hash, nome, nivel, status, criado_em)
+                    VALUES (?, ?, ?, 'diretor', 'ativo', ?)
+                    """,
+                    (username, senha_provisoria_hash, nome, agora),
+                )
         conexao.execute(
             """
             CREATE TABLE IF NOT EXISTS eventos_login (
@@ -779,6 +803,21 @@ def criar_usuario(
             (username.strip(), senha_hash, nome.strip(), email.strip(), nivel, equipe_id, agora),
         )
         return int(cursor.lastrowid)
+
+
+def trocar_propria_senha(usuario_id: int, senha_atual: str, senha_nova: str) -> None:
+    """Autoatendimento -- qualquer usuário logado troca a própria senha, sem
+    depender do diretor. Confere a senha atual antes de aceitar a nova."""
+    with conectar() as conexao:
+        linha = conexao.execute(
+            "SELECT senha_hash FROM usuarios WHERE id = ?", (usuario_id,)
+        ).fetchone()
+        if not linha or not bcrypt.checkpw(senha_atual.encode("utf-8"), linha["senha_hash"].encode("utf-8")):
+            raise ValueError("Senha atual incorreta.")
+        if len(senha_nova) < SENHA_TAMANHO_MINIMO:
+            raise ValueError(f"A nova senha precisa ter pelo menos {SENHA_TAMANHO_MINIMO} caracteres.")
+        novo_hash = bcrypt.hashpw(senha_nova.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        conexao.execute("UPDATE usuarios SET senha_hash = ? WHERE id = ?", (novo_hash, usuario_id))
 
 
 def buscar_usuario_por_username(username: str) -> dict[str, Any] | None:
@@ -1428,6 +1467,33 @@ def excluir_lead(lead_id: int) -> None:
     st.cache_data.clear()
 
 
+FRASE_CONFIRMACAO_ZERAR_BASE = "ZERAR TUDO"
+
+
+def zerar_base_leads() -> int:
+    """Apaga TODOS os leads e tudo que só existe em função deles (snapshots,
+    sinais, histórico de score, outcomes, mensagens). Ação irreversível,
+    restrita a diretor -- mais estrita que a exclusão individual (que também
+    libera gerente) por causa do tamanho do estrago possível.
+
+    Não mexe em usuários, equipes, campanhas, alvos contínuos ou na lista de
+    supressão de contato (essa é um registro de compliance independente de
+    qualquer lead específico)."""
+    if st.session_state.get("nivel_usuario") != "diretor":
+        raise PermissionError("Só o diretor pode zerar a base de leads.")
+    with conectar() as conexao:
+        total = int(conexao.execute("SELECT COUNT(*) AS n FROM leads").fetchone()["n"])
+        for tabela in (
+            "company_snapshots", "sales_signals", "opportunity_score_history",
+            "opportunity_outcomes", "mensagens_enviadas",
+        ):
+            conexao.execute(f"DELETE FROM {tabela}")
+        conexao.execute("DELETE FROM atividades_comerciais WHERE lead_id IS NOT NULL")
+        conexao.execute("DELETE FROM leads")
+    st.cache_data.clear()
+    return total
+
+
 def atualizar_etapa_funil(lead_id: int, nova_etapa: str):
     """Atualiza a etapa do funil para um único lead."""
     if nova_etapa not in STATUS:
@@ -1662,6 +1728,19 @@ with st.sidebar:
         f"{st.session_state.get('nome_usuario') or st.session_state.get('usuario_logado', '—')} · "
         f"{rotulo_nivel(_nivel_atual)}"
     )
+    with st.expander("Trocar senha", icon=":material/lock_reset:"):
+        with st.form("form_trocar_senha", border=False):
+            senha_atual_form = st.text_input("Senha atual", type="password", key="trocar_senha_atual")
+            senha_nova_form = st.text_input("Nova senha", type="password", key="trocar_senha_nova")
+            if st.form_submit_button("Salvar nova senha", width="stretch"):
+                try:
+                    trocar_propria_senha(
+                        st.session_state.get("usuario_id"), senha_atual_form, senha_nova_form
+                    )
+                    st.success("Senha alterada.")
+                except ValueError as erro:
+                    st.error(str(erro))
+
     if st.button("Sair", width="stretch"):
         for chave in (
             "autenticado", "usuario_logado", "usuario_id", "nivel_usuario",
@@ -3546,6 +3625,27 @@ if aba_equipe:
                         "ip": st.column_config.TextColumn("IP"),
                     },
                 )
+
+        with st.expander("Zona de risco", icon=":material/warning:"):
+            st.caption(
+                "Apaga todos os leads, snapshots, sinais e histórico de oportunidade da base. "
+                "Não afeta usuários, equipes, campanhas nem a lista de supressão de contato. "
+                "Ação irreversível."
+            )
+            st.text_input(
+                f'Digite "{FRASE_CONFIRMACAO_ZERAR_BASE}" para habilitar',
+                key="confirmacao_zerar_base",
+            )
+            if st.button(
+                "Zerar base de leads",
+                type="secondary",
+                icon=":material/delete_forever:",
+                disabled=st.session_state.get("confirmacao_zerar_base", "") != FRASE_CONFIRMACAO_ZERAR_BASE,
+            ):
+                quantidade_zerada = zerar_base_leads()
+                st.session_state.pop("confirmacao_zerar_base", None)
+                st.session_state["aviso_equipe"] = f"{quantidade_zerada} lead(s) apagado(s). Base zerada."
+                st.rerun()
 
 st.markdown(
     """
