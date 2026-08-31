@@ -96,7 +96,6 @@ from automation import (
 )
 from opportunity_engine import (
     NIVEIS_OPORTUNIDADE,
-    build_evidence,
     get_opportunity_timeline,
     recommend_next_action,
 )
@@ -1508,8 +1507,17 @@ def _render_kanban_card(lead: pd.Series, etapa_atual: str) -> None:
         f'<span class="kanban-fact"><span>Valor</span><strong>R$ {valor_proposta:,.0f}</strong></span>'
         if valor_proposta > 0 else ""
     )
+    proximo_contato_html = (
+        f'<span class="kanban-fact{classe_contato}">'
+        f'<span>Próximo contato</span><strong>{escape(rotulo_proximo_contato)}</strong>'
+        f"</span>"
+    )
 
     with st.container(key=f"kanban_card_{int(lead['id'])}"):
+        # Os fatos ficam concatenados numa linha só (sem quebra entre eles):
+        # quando valor_html fica vazio (lead sem proposta), uma linha em branco
+        # no meio do bloco HTML interrompe o parser de Markdown do Streamlit no
+        # meio do <div>, e o restante passa a ser exibido como texto cru.
         st.markdown(
             f"""
             <div class="kanban-card">
@@ -1518,12 +1526,7 @@ def _render_kanban_card(lead: pd.Series, etapa_atual: str) -> None:
                 <div class="score-badge {score_classe}">{score_str}</div>
               </div>
               <div class="kanban-location">{escape(cidade)} · {escape(nicho)}</div>
-              <div class="kanban-facts">
-                {valor_html}
-                <span class="kanban-fact{classe_contato}">
-                  <span>Próximo contato</span><strong>{escape(rotulo_proximo_contato)}</strong>
-                </span>
-              </div>
+              <div class="kanban-facts">{valor_html}{proximo_contato_html}</div>
               <div class="kanban-owner">Responsável · {escape(str(responsavel or 'Não atribuído'))}</div>
             </div>
             """,
@@ -2796,8 +2799,20 @@ if aba_base:
             "nome_empresa", "cidade", "nicho", "segmento_icp",
             "pontuacao", "status", "valor_proposta", "proximo_contato", "responsavel_nome",
         ]
+        # Cópia só para exibição: campos vazios chegam do banco como None (não
+        # NaN/NaT), e Number/DateColumn mostram esse None cru como texto "None"
+        # em vez de célula vazia. `atualizar_leads` compara via
+        # `_valor_para_str_canonico`, que trata None e NaN da mesma forma
+        # (ambos viram ""), então isso não afeta o que é salvo -- só a exibição.
+        base_editor = base[colunas].copy()
+        base_editor["valor_proposta"] = pd.to_numeric(base_editor["valor_proposta"], errors="coerce")
+        base_editor["pontuacao"] = pd.to_numeric(base_editor["pontuacao"], errors="coerce")
+        base_editor["proximo_contato"] = pd.to_datetime(base_editor["proximo_contato"], errors="coerce")
+        for _coluna_texto_vazia in ("segmento_icp", "responsavel_nome"):
+            base_editor[_coluna_texto_vazia] = base_editor[_coluna_texto_vazia].fillna("")
+
         editado = st.data_editor(
-            base[colunas],
+            base_editor,
             width="stretch",
             hide_index=True,
             column_order=colunas_visiveis,
@@ -3135,15 +3150,17 @@ if aba_radar:
                 compacto=True,
             )
         else:
+            # "Why Now" e "Atualizado" ficam só no painel de detalhe abaixo --
+            # numa tabela de várias linhas, a frase inteira repetida empurra
+            # Fit/Intent/Timing pra fora da tela sem agregar nada de novo.
             _tabela_radar = _filtrado[[
                 "id", "nome_empresa", "opportunity_score", "opportunity_delta", "opportunity_level",
-                "fit_score", "intent_score", "timing_score", "last_signal_at",
-                "why_now", "opportunity_updated_at", "responsavel_nome",
+                "fit_score", "intent_score", "timing_score", "last_signal_at", "responsavel_nome",
             ]].copy()
-            for _coluna_data in ("last_signal_at", "opportunity_updated_at"):
-                _tabela_radar[_coluna_data] = pd.to_datetime(
-                    _tabela_radar[_coluna_data], errors="coerce", utc=True
-                ).dt.strftime("%d/%m/%Y %H:%M")
+            _tabela_radar["last_signal_at"] = pd.to_datetime(
+                _tabela_radar["last_signal_at"], errors="coerce", utc=True
+            ).dt.strftime("%d/%m/%Y %H:%M").fillna("—")
+            _tabela_radar["responsavel_nome"] = _tabela_radar["responsavel_nome"].fillna("—")
             _tabela_radar = _tabela_radar.rename(columns={
                 "nome_empresa": "Empresa",
                 "opportunity_score": "Opportunity Score",
@@ -3153,8 +3170,6 @@ if aba_radar:
                 "intent_score": "Intent",
                 "timing_score": "Timing",
                 "last_signal_at": "Último sinal",
-                "why_now": "Why Now",
-                "opportunity_updated_at": "Atualizado",
                 "responsavel_nome": "Responsável",
             })
             st.dataframe(
@@ -3195,13 +3210,12 @@ if aba_radar:
                 st.markdown(f"**Why now:** {escape(str(_linha_detalhe.get('why_now') or '—'))}")
 
                 with st.expander("Evidências", icon=":material/fact_check:"):
-                    _evidencias = build_evidence(_sinais_detalhe)
-                    if not _evidencias:
+                    if not _sinais_detalhe:
                         st.caption("Nenhum sinal ativo com evidência registrada ainda.")
-                    for _evid in _evidencias:
+                    for _sinal in _sinais_detalhe:
                         st.caption(
-                            f"[{escape(str(_evid.get('source') or '—'))} · {escape(_fmt_data_radar(_evid.get('collected_at')))}] "
-                            f"{escape(str(_evid.get('field') or ''))}: {escape(str(_evid.get('previous_value')))} → {escape(str(_evid.get('value')))}"
+                            f"[{escape(str(_sinal.get('source') or '—'))} · {escape(_fmt_data_radar(_sinal.get('detected_at')))}] "
+                            f"{escape(str(_sinal.get('description') or _sinal.get('title') or ''))}"
                         )
 
                 with st.expander("Linha do tempo", icon=":material/timeline:"):
