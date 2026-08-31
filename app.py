@@ -2473,6 +2473,7 @@ if aba_prospeccao:
             width="content",
         ):
             inseridos, duplicados = salvar_leads(resultados)
+            st.cache_data.clear()
             st.toast(f"{inseridos} lead(s) adicionado(s) à base.", icon=":material/check_circle:")
             st.session_state["aviso_prospeccao"] = f"{inseridos} lead(s) adicionado(s). {duplicados} duplicado(s) ignorado(s)."
             st.session_state["resumo_busca_salva"] = {
@@ -2761,7 +2762,10 @@ if aba_automacao:
             )
             if st.button("Salvar leads ativos na base", key="salvar_resultados_robo"):
                 inseridos, duplicados = salvar_leads(resultados_robo)
-                st.success(f"{inseridos} lead(s) salvo(s). {duplicados} duplicado(s) ignorado(s).")
+                st.cache_data.clear()
+                st.session_state.pop("resultados_robo", None)
+                st.session_state["aviso_prospeccao"] = f"{inseridos} lead(s) salvo(s). {duplicados} duplicado(s) ignorado(s)."
+                st.rerun()
 
 @st.dialog("Excluir empresa?")
 def _confirmar_exclusao_lead(lead_id: int, nome: str, cidade: str, etapa: str) -> None:
