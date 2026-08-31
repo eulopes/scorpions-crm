@@ -23,7 +23,7 @@ NIVEIS: dict[str, dict[str, Any]] = {
         ),
         "escopo_leads": "proprios",
         "paginas_visiveis": (
-            "Visão geral", "Pipeline", "Prospecção", "Empresas", "Contato", "Nova empresa",
+            "Visão geral", "Pipeline", "Prospecção", "Empresas", "Contato", "Radar", "Nova empresa",
         ),
         "pode_criar_leads": True,
         "pode_editar_leads": True,
@@ -44,7 +44,7 @@ NIVEIS: dict[str, dict[str, Any]] = {
         ),
         "escopo_leads": "equipe",
         "paginas_visiveis": (
-            "Visão geral", "Pipeline", "Prospecção", "Empresas", "Contato", "Nova empresa",
+            "Visão geral", "Pipeline", "Prospecção", "Empresas", "Contato", "Radar", "Nova empresa",
             "Automação", "Equipe",
         ),
         "pode_criar_leads": True,
@@ -66,7 +66,7 @@ NIVEIS: dict[str, dict[str, Any]] = {
         ),
         "escopo_leads": "todos",
         "paginas_visiveis": (
-            "Visão geral", "Pipeline", "Prospecção", "Empresas", "Contato", "Nova empresa",
+            "Visão geral", "Pipeline", "Prospecção", "Empresas", "Contato", "Radar", "Nova empresa",
             "Automação", "Equipe",
         ),
         "pode_criar_leads": True,
@@ -88,7 +88,7 @@ NIVEIS: dict[str, dict[str, Any]] = {
         ),
         "escopo_leads": "todos",
         "paginas_visiveis": (
-            "Visão geral", "Pipeline", "Prospecção", "Empresas", "Contato", "Nova empresa",
+            "Visão geral", "Pipeline", "Prospecção", "Empresas", "Contato", "Radar", "Nova empresa",
             "Automação", "Equipe",
         ),
         "pode_criar_leads": True,

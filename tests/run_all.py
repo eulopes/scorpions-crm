@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ARQUIVOS_DE_TESTE = [
     "tests.test_app_smoke",
     "tests.test_app_actions",
+    "tests.test_opportunity_engine",
 ]
 
 

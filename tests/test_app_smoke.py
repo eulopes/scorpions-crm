@@ -40,6 +40,7 @@ class AppSmokeTest(unittest.TestCase):
                 self.assertEqual([], list(app.exception))
 
                 self._seed_business_data(database, password_hash)
+                self._seed_scored_lead(database)
 
                 app.text_input(key="login_usuario").set_value("teste")
                 app.text_input(key="login_senha").set_value(password)
@@ -52,6 +53,7 @@ class AppSmokeTest(unittest.TestCase):
                     "Pipeline": "Pipeline",
                     "Prospec\u00e7\u00e3o": "Prospec\u00e7\u00e3o",
                     "Empresas": "Clientes",
+                    "Radar": "Radar",
                     "Nova empresa": "Nova empresa",
                     "Automa\u00e7\u00e3o": "Automa\u00e7\u00e3o",
                     "Equipe": "Equipe",
@@ -65,6 +67,72 @@ class AppSmokeTest(unittest.TestCase):
                             str(element.value) for element in app.markdown
                         )
                         self.assertIn(expected_title, rendered_markdown)
+
+                        if route == "Radar":
+                            # Cobre o caminho "com dados" (tabela, filtros e
+                            # detalhe de uma oportunidade) -- o único lead
+                            # seedado com opportunity_score é o "Empresa Radar
+                            # Teste" inserido por _seed_scored_lead.
+                            self.assertGreaterEqual(len(app.dataframe), 1)
+                            detalhe = app.selectbox(key="radar_detalhe_selecionado")
+                            self.assertGreaterEqual(len(detalhe.options), 1)
+                            self.assertIn("Why this company", rendered_markdown)
+                            self.assertIn("Why now", rendered_markdown)
+                            self.assertIn("Próxima melhor ação", rendered_markdown)
+
+    @staticmethod
+    def _seed_scored_lead(database: Path) -> None:
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                """
+                INSERT INTO leads (
+                    place_id, nome_empresa, nicho, cidade, telefone, email, site, cnpj,
+                    status, origem, segmento_icp, servicos_recomendados, status_receita,
+                    fit_score, intent_score, timing_score, data_confidence_score,
+                    opportunity_score, opportunity_level, opportunity_reason, why_now,
+                    opportunity_updated_at, opportunity_delta, last_signal_at,
+                    criado_em, atualizado_em
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "smoke:radar", "Empresa Radar Teste", "Transportadora", "Campinas, SP",
+                    "(11) 90000-0000", "radar@example.com", "https://radar.example.com", "11222333000181",
+                    "Novos Leads", "Teste isolado", "Galpões Logísticos & Indústrias", "CFTV perimetral",
+                    "ATIVA",
+                    90, 85, 80, 95,
+                    88, "Alta", "Esta empresa apresenta características fortemente compatíveis com o perfil.",
+                    "Priorizar abordagem comercial nos próximos dias.",
+                    now, 12, now, now, now,
+                ),
+            )
+
+    @staticmethod
+    def _seed_scored_lead(database: Path) -> None:
+        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        with sqlite3.connect(database) as connection:
+            connection.execute(
+                """
+                INSERT INTO leads (
+                    place_id, nome_empresa, nicho, cidade, telefone, email, site, cnpj,
+                    status, origem, segmento_icp, servicos_recomendados, status_receita,
+                    fit_score, intent_score, timing_score, data_confidence_score,
+                    opportunity_score, opportunity_level, opportunity_reason, why_now,
+                    opportunity_updated_at, opportunity_delta, last_signal_at,
+                    criado_em, atualizado_em
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "smoke:radar", "Empresa Radar Teste", "Transportadora", "Campinas, SP",
+                    "(11) 90000-0000", "radar@example.com", "https://radar.example.com", "11222333000181",
+                    "Novos Leads", "Teste isolado", "Galpões Logísticos & Indústrias", "CFTV perimetral",
+                    "ATIVA",
+                    90, 85, 80, 95,
+                    88, "Alta", "Esta empresa apresenta características fortemente compatíveis com o perfil.",
+                    "Priorizar abordagem comercial nos próximos dias.",
+                    now, 12, now, now, now,
+                ),
+            )
 
     @staticmethod
     def _seed_business_data(database: Path, password_hash: str) -> None:

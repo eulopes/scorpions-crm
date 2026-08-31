@@ -41,6 +41,12 @@ from niche_sources import (
     roteamento_por_nicho,
     separar_cidade_uf,
 )
+from company_history import compare_snapshots, create_company_snapshot, get_latest_snapshot
+from company_history import migrar_esquema as _migrar_esquema_company_history
+from sales_signals import derive_signals_from_changes
+from sales_signals import migrar_esquema as _migrar_esquema_sales_signals
+from opportunity_engine import evaluate_opportunity, sincronizar_outcomes_pendentes
+from opportunity_engine import migrar_esquema as _migrar_esquema_opportunity_engine
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -357,6 +363,18 @@ def iniciar_banco_automacao() -> None:
             "valor_proposta": "REAL",
             "alerta_vencido_em": "TEXT",
             "proximo_contato": "TEXT",
+            "fit_score": "INTEGER",
+            "intent_score": "INTEGER",
+            "timing_score": "INTEGER",
+            "data_confidence_score": "INTEGER",
+            "opportunity_score": "INTEGER",
+            "opportunity_level": "TEXT",
+            "opportunity_reason": "TEXT",
+            "why_now": "TEXT",
+            "opportunity_updated_at": "TEXT",
+            "opportunity_delta": "INTEGER",
+            "last_signal_at": "TEXT",
+            "next_intelligence_refresh_at": "TEXT",
         }.items():
             if coluna not in colunas_leads:
                 conexao.execute(f"ALTER TABLE leads ADD COLUMN {coluna} {tipo}")
@@ -446,6 +464,12 @@ def iniciar_banco_automacao() -> None:
         conexao.execute(
             "CREATE INDEX IF NOT EXISTS idx_mensagens_enviadas_lead ON mensagens_enviadas(lead_id, criado_em DESC)"
         )
+
+        # Opportunity Intelligence: cada módulo migra seu próprio esquema,
+        # na mesma transação -- nunca apaga dado existente, só acrescenta.
+        _migrar_esquema_company_history(conexao)
+        _migrar_esquema_sales_signals(conexao)
+        _migrar_esquema_opportunity_engine(conexao)
 
 
 def _normalizar_telefone(telefone: str) -> str:
@@ -1312,18 +1336,19 @@ def _telefone_bacen(contato: dict[str, Any]) -> str:
 
 
 def _buscar_contatos_bacen(cidade: str, uf: str) -> dict[str, dict[str, Any]]:
+    # Mesmo motivo do filtro de buscar_bacen_instituicoes: MUNICIPIO vem com
+    # acento e um filtro exato server-side zera o resultado quando o usuário
+    # digita sem acento. UF continua no filtro (sigla, sem risco de acento).
     filtros: list[str] = []
-    if cidade:
-        cidade_odata = _escapar_odata(cidade.upper())
-        filtros.append(f"MUNICIPIO eq '{cidade_odata}'")
     if uf:
         filtros.append(f"UF eq '{uf}'")
+    cidade_normalizada = normalizar_texto(cidade) if cidade else ""
 
     contatos: dict[str, dict[str, Any]] = {}
     for recurso in BACEN_RECURSOS_CONTATO:
         try:
-            # Este serviço legado retorna erro quando recebe $skip; o filtro por município
-            # mantém a resposta pequena, então usamos um único limite amplo.
+            # Este serviço legado retorna erro quando recebe $skip, então usamos
+            # um único limite amplo (o filtro por UF já reduz bastante o volume).
             parametros: dict[str, Any] = {"$top": 5_000, "$format": "json"}
             if filtros:
                 parametros["$filter"] = " and ".join(filtros)
@@ -1343,6 +1368,8 @@ def _buscar_contatos_bacen(cidade: str, uf: str) -> dict[str, dict[str, Any]]:
         for item in itens:
             if not isinstance(item, dict):
                 continue
+            if cidade_normalizada and normalizar_texto(item.get("MUNICIPIO")) != cidade_normalizada:
+                continue
             cnpj_basico = re.sub(r"\D", "", str(item.get("CNPJ") or ""))
             if len(cnpj_basico) == 8 and cnpj_basico not in contatos:
                 contatos[cnpj_basico] = item
@@ -1354,10 +1381,11 @@ def buscar_bacen_instituicoes(nicho: str, localizacao: str, limite: int) -> list
     cidade, uf = separar_cidade_uf(localizacao, permite_brasil=True)
     limite = max(1, min(int(limite), LIMITE_MAXIMO))
 
+    # O município NÃO entra no filtro OData: nomeDoMunicipio vem do Bacen com
+    # acento (ex.: "São Paulo") e o usuário frequentemente digita sem acento
+    # ("Sao Paulo") -- um filtro exato server-side zerava os resultados nesse
+    # caso comum. Filtramos por município depois, já normalizado, client-side.
     filtros = ["codigoTipoSituacaoPessoaJuridica eq '3'"]
-    if cidade:
-        cidade_odata = _escapar_odata(cidade.casefold())
-        filtros.append(f"tolower(nomeDoMunicipio) eq '{cidade_odata}'")
     if uf:
         filtros.append(f"nomeDaUnidadeFederativa eq '{_escapar_odata(UF_POR_SIGLA[uf])}'")
 
@@ -1419,6 +1447,13 @@ def buscar_bacen_instituicoes(nicho: str, localizacao: str, limite: int) -> list
 
     if entidades is None:
         raise RuntimeError(f"Não foi possível consultar a base pública do Bacen: {ultimo_erro}.")
+
+    if cidade:
+        cidade_normalizada = normalizar_texto(cidade)
+        entidades = [
+            entidade for entidade in entidades
+            if normalizar_texto(entidade.get("nomeDoMunicipio")) == cidade_normalizada
+        ]
 
     termo = normalizar_texto(nicho)
     termos_amplos = {
@@ -2372,9 +2407,110 @@ def _verificar_e_alertar_vencidos() -> int:
     return enviados
 
 
+LIMITE_REFRESH_INTELIGENCIA_POR_CICLO = 15
+
+
+def _montar_snapshot_a_partir_de_lead(lead: dict[str, Any]) -> dict[str, Any]:
+    """Traduz as colunas já existentes de `leads` pro formato de snapshot --
+    não faz nenhuma chamada HTTP nova, só reaproveita o que já está salvo."""
+    cidade_bruta = str(lead.get("cidade") or "").strip()
+    try:
+        cidade, uf = separar_cidade_uf(cidade_bruta, permite_brasil=True)
+    except ValueError:
+        cidade, uf = cidade_bruta, ""
+    return {
+        "lead_id": lead["id"],
+        "company_name": lead.get("razao_social") or lead.get("nome_empresa"),
+        "trade_name": lead.get("nome_empresa"),
+        "cnpj": lead.get("cnpj"),
+        "address": lead.get("endereco"),
+        "city": cidade or cidade_bruta,
+        "state": uf,
+        "phone": lead.get("telefone"),
+        "email": lead.get("email"),
+        "website": lead.get("site"),
+        "business_status": lead.get("status_receita"),
+        "rating": None,
+        "reviews_count": None,
+        "categories_json": lead.get("nicho"),
+        "units_detected": None,
+    }
+
+
+def _leads_elegiveis_para_inteligencia(limite: int) -> list[dict[str, Any]]:
+    agora = iso_utc()
+    with conectar() as conexao:
+        linhas = conexao.execute(
+            """
+            SELECT * FROM leads
+            WHERE next_intelligence_refresh_at IS NULL OR next_intelligence_refresh_at <= ?
+            ORDER BY
+                (opportunity_score IS NULL) DESC,
+                opportunity_score DESC,
+                last_signal_at DESC,
+                atualizado_em DESC
+            LIMIT ?
+            """,
+            (agora, limite),
+        ).fetchall()
+    return [dict(linha) for linha in linhas]
+
+
+def _horas_ate_proximo_refresh(resultado: dict[str, Any]) -> int:
+    nivel = resultado.get("opportunity_level")
+    if nivel in ("Crítica", "Alta"):
+        return 24
+    if nivel == "Boa":
+        return 48
+    return 96
+
+
+def refresh_company_intelligence(limite: int = LIMITE_REFRESH_INTELIGENCIA_POR_CICLO) -> dict[str, Any]:
+    """Atualiza snapshot/sinais/scores das empresas elegíveis. Reaproveita o
+    worker.py existente (chamado por executar_tarefas_rotineiras) -- não cria
+    um scheduler paralelo. Processa em lote pequeno por ciclo para respeitar
+    rate limit e não recalcular o banco inteiro de uma vez."""
+    leads = _leads_elegiveis_para_inteligencia(limite)
+    processados = 0
+    com_novo_sinal = 0
+    erros: list[str] = []
+    for lead in leads:
+        try:
+            snapshot_dados = _montar_snapshot_a_partir_de_lead(lead)
+            fonte = str(lead.get("origem") or "Recoleta")
+            anterior = get_latest_snapshot(lead["id"])
+            criado_id = create_company_snapshot(lead["id"], fonte, snapshot_dados)
+            houve_novo_sinal = False
+            if criado_id is not None:
+                atual = get_latest_snapshot(lead["id"])
+                mudancas = compare_snapshots(anterior, atual)
+                novos_sinais = derive_signals_from_changes(lead["id"], mudancas, fonte=fonte)
+                houve_novo_sinal = bool(novos_sinais)
+                if houve_novo_sinal:
+                    com_novo_sinal += 1
+            resultado = evaluate_opportunity(lead["id"], houve_novo_sinal=houve_novo_sinal)
+            proxima = iso_utc(agora_utc() + timedelta(hours=_horas_ate_proximo_refresh(resultado)))
+            with conectar() as conexao:
+                conexao.execute(
+                    "UPDATE leads SET next_intelligence_refresh_at = ? WHERE id = ?",
+                    (proxima, lead["id"]),
+                )
+            processados += 1
+        except Exception as erro:
+            erros.append(f"lead {lead['id']}: {erro}")
+    return {
+        "processados": processados,
+        "com_novo_sinal": com_novo_sinal,
+        "elegiveis": len(leads),
+        "erros": erros,
+    }
+
+
 def executar_tarefas_rotineiras() -> list[dict[str, Any]]:
     atualizar_heartbeat()
     _verificar_e_alertar_vencidos()
+    refresh_company_intelligence()
+    sincronizar_outcomes_pendentes()
     return [executar_campanha(campanha["id"]) for campanha in campanhas_pendentes(agora_utc())]
 
 

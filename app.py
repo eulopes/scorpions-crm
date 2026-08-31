@@ -94,6 +94,13 @@ from automation import (
     leads_ja_contatados_ha_dias,
     gerar_link_whatsapp,
 )
+from opportunity_engine import (
+    NIVEIS_OPORTUNIDADE,
+    build_evidence,
+    get_opportunity_timeline,
+    recommend_next_action,
+)
+from sales_signals import listar_signals_ativos
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -597,6 +604,18 @@ def iniciar_banco() -> None:
             "alerta_vencido_em": "TEXT",
             "proximo_contato": "TEXT",
             "responsavel_usuario_id": "INTEGER",
+            "fit_score": "INTEGER",
+            "intent_score": "INTEGER",
+            "timing_score": "INTEGER",
+            "data_confidence_score": "INTEGER",
+            "opportunity_score": "INTEGER",
+            "opportunity_level": "TEXT",
+            "opportunity_reason": "TEXT",
+            "why_now": "TEXT",
+            "opportunity_updated_at": "TEXT",
+            "opportunity_delta": "INTEGER",
+            "last_signal_at": "TEXT",
+            "next_intelligence_refresh_at": "TEXT",
         }
         for coluna, tipo in novas_colunas.items():
             if coluna not in colunas_existentes:
@@ -1589,12 +1608,16 @@ with st.sidebar:
     st.markdown('<div class="sidebar-caption">Workspace</div>', unsafe_allow_html=True)
     _nivel_atual = st.session_state.get("nivel_usuario", "vendedor")
     _paginas_do_nivel = paginas_visiveis(_nivel_atual)
+    _oportunidades_criticas_altas = int(
+        _leads_para_contadores["opportunity_level"].isin(["Crítica", "Alta"]).sum()
+    ) if "opportunity_level" in _leads_para_contadores.columns and _total_leads else 0
     contadores_nav = {
         "Visão geral": None,
         "Pipeline": None,
         "Prospecção": None,
         "Empresas": _total_leads,
         "Contato": None,
+        "Radar": _oportunidades_criticas_altas or None,
         "Automação": _campanhas_ativas or None,
         "Nova empresa": None,
         "Equipe": None,
@@ -1605,6 +1628,7 @@ with st.sidebar:
         "Prospecção": ":material/search:  Leads / Prospecção",
         "Empresas": ":material/business:  Clientes / Empresas",
         "Contato": ":material/chat:  Contato",
+        "Radar": ":material/radar:  Radar",
         "Automação": ":material/bolt:  Automação",
         "Nova empresa": ":material/add_business:  Nova empresa",
         "Equipe": ":material/groups:  Equipe",
@@ -1648,6 +1672,7 @@ aba_funil = pagina == "Pipeline"
 aba_prospeccao = pagina == "Prospecção"
 aba_cnpj = pagina == "Empresas"
 aba_contato = pagina == "Contato"
+aba_radar = pagina == "Radar"
 aba_automacao = pagina == "Automação"
 aba_base = pagina == "Empresas"
 aba_manual = pagina == "Nova empresa"
@@ -1693,6 +1718,11 @@ elif aba_contato:
     render_page_header(
         "Contato",
         "Mensagens de WhatsApp assistidas — você confere e envia, o sistema não dispara nada sozinho.",
+    )
+elif aba_radar:
+    render_page_header(
+        "Radar",
+        "Oportunidades priorizadas por Fit, Intent, Timing e confiança dos dados.",
     )
 elif aba_automacao:
     _acoes_automacao = [("+ Nova campanha", "hdr_nova_campanha", True)] if _pode_gerenciar_campanhas else None
@@ -3050,6 +3080,144 @@ if aba_contato:
                 st.rerun()
             else:
                 st.warning("Informe um telefone.")
+
+def _fmt_data_radar(valor: Any) -> str:
+    if not valor:
+        return "—"
+    convertido = pd.to_datetime(valor, errors="coerce", utc=True)
+    return convertido.strftime("%d/%m/%Y %H:%M") if pd.notna(convertido) else str(valor)
+
+
+if aba_radar:
+    _base_radar = leads_visiveis()
+    _com_score = _base_radar[_base_radar["opportunity_score"].notna()].copy() if not _base_radar.empty else _base_radar
+
+    if _com_score.empty:
+        render_empty_state(
+            "Ainda sem oportunidades calculadas",
+            "O worker calcula o Opportunity Score em segundo plano, em lotes — "
+            "assim que ele processar as empresas da base, elas aparecem aqui.",
+            icone="📡",
+        )
+    else:
+        _col_f1, _col_f2, _col_f3, _col_f4 = st.columns([1.2, 1.2, 1, 1])
+        _nichos_radar = ["Todos"] + sorted(_com_score["nicho"].dropna().unique().tolist())
+        _nicho_radar = _col_f1.selectbox("Nicho", _nichos_radar, key="radar_filtro_nicho")
+        _cidade_radar = _col_f2.text_input("Cidade/região", key="radar_filtro_cidade", placeholder="Filtrar por cidade")
+        _score_minimo_radar = _col_f3.slider("Score mínimo", 0, 100, 0, key="radar_filtro_score")
+        _niveis_radar = ["Todos"] + [nivel for _, nivel in NIVEIS_OPORTUNIDADE]
+        _nivel_radar = _col_f4.selectbox("Nível", _niveis_radar, key="radar_filtro_nivel")
+
+        _filtrado = _com_score
+        if _nicho_radar != "Todos":
+            _filtrado = _filtrado[_filtrado["nicho"] == _nicho_radar]
+        if _cidade_radar.strip():
+            _filtrado = _filtrado[_filtrado["cidade"].fillna("").str.contains(_cidade_radar.strip(), case=False)]
+        if _score_minimo_radar:
+            _filtrado = _filtrado[_filtrado["opportunity_score"] >= _score_minimo_radar]
+        if _nivel_radar != "Todos":
+            _filtrado = _filtrado[_filtrado["opportunity_level"] == _nivel_radar]
+        _filtrado = _filtrado.sort_values(
+            by=["opportunity_score", "opportunity_delta"], ascending=[False, False]
+        )
+
+        st.markdown(
+            f'<div class="section-title">{len(_filtrado)} oportunidade(s) '
+            f'de {len(_com_score)} já avaliadas</div>',
+            unsafe_allow_html=True,
+        )
+
+        if _filtrado.empty:
+            render_empty_state(
+                "Nenhuma oportunidade com esses filtros",
+                "Ajuste o nicho, a cidade, o score mínimo ou o nível para ver mais resultados.",
+                icone="🔍",
+                compacto=True,
+            )
+        else:
+            _tabela_radar = _filtrado[[
+                "id", "nome_empresa", "opportunity_score", "opportunity_delta", "opportunity_level",
+                "fit_score", "intent_score", "timing_score", "last_signal_at",
+                "why_now", "opportunity_updated_at", "responsavel_nome",
+            ]].copy()
+            for _coluna_data in ("last_signal_at", "opportunity_updated_at"):
+                _tabela_radar[_coluna_data] = pd.to_datetime(
+                    _tabela_radar[_coluna_data], errors="coerce", utc=True
+                ).dt.strftime("%d/%m/%Y %H:%M")
+            _tabela_radar = _tabela_radar.rename(columns={
+                "nome_empresa": "Empresa",
+                "opportunity_score": "Opportunity Score",
+                "opportunity_delta": "Delta",
+                "opportunity_level": "Nível",
+                "fit_score": "Fit",
+                "intent_score": "Intent",
+                "timing_score": "Timing",
+                "last_signal_at": "Último sinal",
+                "why_now": "Why Now",
+                "opportunity_updated_at": "Atualizado",
+                "responsavel_nome": "Responsável",
+            })
+            st.dataframe(
+                _tabela_radar.drop(columns=["id"]),
+                width="stretch",
+                hide_index=True,
+            )
+
+            _opcoes_detalhe = {
+                f"{linha['nome_empresa']} · Score {int(linha['opportunity_score'])}": int(linha["id"])
+                for _, linha in _filtrado.iterrows()
+            }
+            _rotulo_detalhe = st.selectbox(
+                "Ver detalhe da oportunidade", list(_opcoes_detalhe), key="radar_detalhe_selecionado"
+            )
+            if _rotulo_detalhe:
+                _lead_id_detalhe = _opcoes_detalhe[_rotulo_detalhe]
+                _linha_detalhe = _filtrado[_filtrado["id"] == _lead_id_detalhe].iloc[0]
+                _sinais_detalhe = listar_signals_ativos(_lead_id_detalhe)
+
+                st.markdown(
+                    f"""
+                    <div class="campaign-card">
+                      <div class="head"><div class="name">{escape(str(_linha_detalhe['nome_empresa']))}</div></div>
+                      <div class="scope">Opportunity Score {int(_linha_detalhe['opportunity_score'])} · {escape(str(_linha_detalhe['opportunity_level'] or ''))}</div>
+                      <div class="metrics">
+                        <div><div class="m-label">Fit</div><div class="m-val">{int(_linha_detalhe['fit_score'] or 0)}</div></div>
+                        <div><div class="m-label">Intent</div><div class="m-val">{int(_linha_detalhe['intent_score'] or 0)}</div></div>
+                        <div><div class="m-label">Timing</div><div class="m-val">{int(_linha_detalhe['timing_score'] or 0)}</div></div>
+                        <div><div class="m-label">Confiança</div><div class="m-val">{int(_linha_detalhe['data_confidence_score'] or 0)}</div></div>
+                      </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                st.markdown(f"**Why this company:** {escape(str(_linha_detalhe.get('opportunity_reason') or '—'))}")
+                st.markdown(f"**Why now:** {escape(str(_linha_detalhe.get('why_now') or '—'))}")
+
+                with st.expander("Evidências", icon=":material/fact_check:"):
+                    _evidencias = build_evidence(_sinais_detalhe)
+                    if not _evidencias:
+                        st.caption("Nenhum sinal ativo com evidência registrada ainda.")
+                    for _evid in _evidencias:
+                        st.caption(
+                            f"[{escape(str(_evid.get('source') or '—'))} · {escape(_fmt_data_radar(_evid.get('collected_at')))}] "
+                            f"{escape(str(_evid.get('field') or ''))}: {escape(str(_evid.get('previous_value')))} → {escape(str(_evid.get('value')))}"
+                        )
+
+                with st.expander("Linha do tempo", icon=":material/timeline:"):
+                    _timeline = get_opportunity_timeline(_lead_id_detalhe)
+                    if not _timeline:
+                        st.caption("Sem histórico registrado ainda.")
+                    for _evento in _timeline:
+                        st.caption(f"{escape(_fmt_data_radar(_evento['data']))} — {escape(_evento['descricao'])}")
+
+                _proxima_acao = recommend_next_action(
+                    str(_linha_detalhe.get("opportunity_level") or "Baixa"),
+                    int(_linha_detalhe.get("timing_score") or 0),
+                    int(_linha_detalhe.get("data_confidence_score") or 0),
+                    _linha_detalhe.to_dict(),
+                )
+                st.markdown(f"**Próxima melhor ação:** {escape(_proxima_acao)}")
 
 if aba_manual:
     aviso_nova_empresa = st.session_state.pop("aviso_nova_empresa", None)

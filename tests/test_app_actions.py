@@ -235,6 +235,15 @@ class AcoesReaisTest(unittest.TestCase):
                     any("Equipe" in opcao for opcao in opcoes_menu),
                 )
 
+                # Não basta o item aparecer no menu -- cada página precisa
+                # renderizar sem exceção sob o escopo real de leads do nível
+                # (proprios/equipe/todos), que é o que mais varia por papel.
+                for pagina in paginas_esperadas:
+                    with self.subTest(nivel=nivel, pagina=pagina):
+                        at.radio(key="navegacao_principal").set_value(pagina)
+                        at.run(timeout=30)
+                        self.assertEqual([], list(at.exception))
+
                 _logout(at)
 
 
