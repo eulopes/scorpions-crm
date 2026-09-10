@@ -103,9 +103,20 @@ def _dias_desde(momento_iso: str | None) -> int:
     return max(0, (agora_utc() - instante).days)
 
 
+_PORTE_PONTOS = {
+    "DEMAIS": 12,
+    "EMPRESA DE PEQUENO PORTE": 4,
+    "MICRO EMPRESA": 0,
+}
+
+
 def calculate_fit_score(lead: dict[str, Any], ultimo_snapshot: dict[str, Any] | None) -> int:
     """'Quanto esta empresa combina com o cliente ideal?' -- sem eventos
-    temporais, só características firmográficas já conhecidas do lead."""
+    temporais, só características firmográficas já conhecidas do lead.
+
+    Porte e capital social (Receita) entram como reforço: uma empresa maior
+    tende a ter galpão, várias unidades e necessidade real de infra. São
+    bônus sobre um teto de 100 -- um match forte de ICP já satura sozinho."""
     pontos = 0
     segmento = str(lead.get("segmento_icp") or "").strip()
     if segmento and segmento in PERFIS_ICP:
@@ -114,12 +125,25 @@ def calculate_fit_score(lead: dict[str, Any], ultimo_snapshot: dict[str, Any] | 
         pontos += 15
     if str(lead.get("cidade") or "").strip():
         pontos += 10
-    unidades = (ultimo_snapshot or {}).get("units_detected") or 0
+    snapshot = ultimo_snapshot or {}
+    unidades = snapshot.get("units_detected") or 0
     try:
         if int(unidades) >= 2:
             pontos += 20
     except (TypeError, ValueError):
         pass
+
+    porte = str(snapshot.get("porte") or "").strip().upper()
+    pontos += _PORTE_PONTOS.get(porte, 0)
+    try:
+        capital = float(snapshot.get("capital_social") or 0)
+    except (TypeError, ValueError):
+        capital = 0.0
+    if capital >= 1_000_000:
+        pontos += 12
+    elif capital >= 200_000:
+        pontos += 6
+
     return min(100, pontos)
 
 

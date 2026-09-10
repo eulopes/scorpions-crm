@@ -112,6 +112,57 @@ class ChangeDetectionTest(unittest.TestCase):
         mudancas = change_detection.comparar_snapshots(anterior, atual)
         self.assertEqual(mudancas[0]["type"], "possivel_nova_unidade")
 
+    def _por_tipo(self, anterior_extra, atual_extra):
+        base = {"captured_at": "2026-01-01T00:00:00+00:00"}
+        anterior = dict(base, **anterior_extra)
+        atual = dict(base, captured_at="2026-02-01T00:00:00+00:00", **atual_extra)
+        return {m["type"]: m for m in change_detection.comparar_snapshots(anterior, atual)}
+
+    def test_aumento_de_capital_social_com_percentual_e_fonte(self):
+        m = self._por_tipo({"capital_social": 100000.0}, {"capital_social": 250000.0})
+        self.assertIn("capital_social_aumentou", m)
+        self.assertEqual(m["capital_social_aumentou"]["percentage_change"], 150.0)
+        self.assertEqual(m["capital_social_aumentou"]["source"], change_detection.FONTE_RECEITA)
+
+    def test_reducao_de_capital_nao_gera_evento(self):
+        m = self._por_tipo({"capital_social": 250000.0}, {"capital_social": 100000.0})
+        self.assertNotIn("capital_social_aumentou", m)
+
+    def test_mudanca_de_cnae_principal(self):
+        m = self._por_tipo(
+            {"cnae_principal": "4110 · Incorporação"},
+            {"cnae_principal": "5211 · Armazéns gerais"},
+        )
+        self.assertIn("cnae_principal_alterado", m)
+
+    def test_cnae_secundario_novo_so_com_baseline(self):
+        sem_baseline = self._por_tipo(
+            {"cnaes_secundarios_json": None},
+            {"cnaes_secundarios_json": '["1234 · X"]'},
+        )
+        self.assertNotIn("cnae_secundario_novo", sem_baseline)
+        com_baseline = self._por_tipo(
+            {"cnaes_secundarios_json": '["1234 · X"]'},
+            {"cnaes_secundarios_json": '["1234 · X", "5678 · Y"]'},
+        )
+        self.assertIn("cnae_secundario_novo", com_baseline)
+        self.assertEqual(com_baseline["cnae_secundario_novo"]["novos"], ["5678 · Y"])
+
+    def test_situacao_cadastral_reativacao_e_inativacao(self):
+        reativou = self._por_tipo({"situacao_cadastral": "INAPTA"}, {"situacao_cadastral": "ATIVA"})
+        self.assertTrue(reativou["situacao_cadastral_alterada"]["reativacao"])
+        self.assertFalse(reativou["situacao_cadastral_alterada"]["inativacao"])
+        baixou = self._por_tipo({"situacao_cadastral": "ATIVA"}, {"situacao_cadastral": "BAIXADA"})
+        self.assertTrue(baixou["situacao_cadastral_alterada"]["inativacao"])
+
+    def test_quadro_societario_alterado_conta_socios(self):
+        m = self._por_tipo(
+            {"qsa_hash": "aaa", "qtde_socios": 2},
+            {"qsa_hash": "bbb", "qtde_socios": 3},
+        )
+        self.assertIn("quadro_societario_alterado", m)
+        self.assertEqual(m["quadro_societario_alterado"]["socios_depois"], 3)
+
 
 class CompanyHistoryTest(unittest.TestCase):
     def setUp(self):
@@ -164,6 +215,32 @@ class SalesSignalsTest(unittest.TestCase):
         self.assertEqual(len(primeiro), 1)
         self.assertEqual(len(segundo), 0)
 
+    def test_aumento_de_capital_gera_sinal_capital_increase(self):
+        mudanca = {
+            "type": "capital_social_aumentou", "field": "capital_social",
+            "before": 100000.0, "after": 300000.0, "days_between": 20,
+            "percentage_change": 200.0, "source": sales_signals.FONTE_RECEITA,
+        }
+        ids = derive_signals_from_changes(self.lead_id, [mudanca], fonte="OpenStreetMap")
+        self.assertEqual(len(ids), 1)
+        sinais = sales_signals.listar_signals_ativos(self.lead_id)
+        self.assertEqual(sinais[0]["signal_type"], sales_signals.CAPITAL_INCREASE)
+        # A fonte da mudança (Receita) vence a fonte do lote (OSM) e eleva a confiança.
+        self.assertEqual(sinais[0]["source"], sales_signals.FONTE_RECEITA)
+        self.assertGreaterEqual(sinais[0]["confidence"], 85)
+        self.assertGreaterEqual(sinais[0]["signal_strength"], 80)
+
+    def test_inativacao_na_receita_gera_sinal_fraco(self):
+        mudanca = {
+            "type": "situacao_cadastral_alterada", "field": "situacao_cadastral",
+            "before": "ATIVA", "after": "BAIXADA", "days_between": 10,
+            "inativacao": True, "reativacao": False, "source": sales_signals.FONTE_RECEITA,
+        }
+        derive_signals_from_changes(self.lead_id, [mudanca], fonte="Teste")
+        sinais = sales_signals.listar_signals_ativos(self.lead_id)
+        self.assertEqual(sinais[0]["signal_type"], sales_signals.REGISTRY_STATUS_CHANGE)
+        self.assertLessEqual(sinais[0]["signal_strength"], 20)
+
 
 class OpportunityEngineTest(unittest.TestCase):
     def test_fit_score_maximo_e_minimo(self):
@@ -173,6 +250,14 @@ class OpportunityEngineTest(unittest.TestCase):
         }
         self.assertEqual(calculate_fit_score(lead_classificado, {"units_detected": 3}), 100)
         self.assertEqual(calculate_fit_score({}, None), 0)
+
+    def test_fit_score_reforcado_por_porte_e_capital(self):
+        lead = {"segmento_icp": "Galpões Logísticos & Indústrias", "cidade": "Campinas, SP"}
+        base = calculate_fit_score(lead, None)  # 55 + 10
+        maior = calculate_fit_score(lead, {"porte": "DEMAIS", "capital_social": 5_000_000})
+        self.assertEqual(maior, base + 12 + 12)
+        pequena = calculate_fit_score(lead, {"porte": "MICRO EMPRESA", "capital_social": 50_000})
+        self.assertEqual(pequena, base)
 
     def test_data_confidence_maximo_e_minimo(self):
         lead_completo = {

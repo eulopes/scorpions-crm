@@ -14,6 +14,7 @@ import sqlite3
 from datetime import timedelta
 from typing import Any
 
+from change_detection import FONTE_RECEITA
 from company_history import agora_utc, conectar, iso_utc
 
 NEW_BRANCH = "NEW_BRANCH"
@@ -28,6 +29,12 @@ BUSINESS_STATUS_CHANGE = "BUSINESS_STATUS_CHANGE"
 NEW_COMPANY = "NEW_COMPANY"
 DIGITAL_GROWTH = "DIGITAL_GROWTH"
 COMPANY_EXPANSION = "COMPANY_EXPANSION"
+# Sinais firmográficos da Receita (Fase 0).
+CAPITAL_INCREASE = "CAPITAL_INCREASE"
+CORE_ACTIVITY_CHANGE = "CORE_ACTIVITY_CHANGE"
+NEW_CNAE = "NEW_CNAE"
+REGISTRY_STATUS_CHANGE = "REGISTRY_STATUS_CHANGE"
+OWNERSHIP_CHANGE = "OWNERSHIP_CHANGE"
 
 # Preparado para fontes futuras -- não implementados por não haver ainda uma
 # fonte real capaz de sustentar a evidência (regra explícita: não inventar).
@@ -41,6 +48,10 @@ _MEIA_VIDA_DIAS = {
     REVIEWS_GROWTH: 30, RATING_GROWTH: 30, DIGITAL_GROWTH: 30,
     ADDRESS_CHANGE: 60, NEW_WEBSITE: 30, WEBSITE_CHANGE: 20,
     NEW_PHONE: 20, BUSINESS_STATUS_CHANGE: 60, NEW_COMPANY: 30,
+    # Eventos firmográficos têm janela comercial longa -- um aumento de capital
+    # ou pivô de atividade repercute em investimento por vários meses.
+    CAPITAL_INCREASE: 120, CORE_ACTIVITY_CHANGE: 90, NEW_CNAE: 90,
+    REGISTRY_STATUS_CHANGE: 60, OWNERSHIP_CHANGE: 90,
 }
 _VALIDADE_DIAS_PADRAO = 90
 
@@ -54,6 +65,11 @@ _MAPA_TIPO_MUDANCA_PARA_SINAL = {
     "crescimento_avaliacoes": REVIEWS_GROWTH,
     "alteracao_rating": RATING_GROWTH,
     "empresa_adicionada": NEW_COMPANY,
+    "capital_social_aumentou": CAPITAL_INCREASE,
+    "cnae_principal_alterado": CORE_ACTIVITY_CHANGE,
+    "cnae_secundario_novo": NEW_CNAE,
+    "situacao_cadastral_alterada": REGISTRY_STATUS_CHANGE,
+    "quadro_societario_alterado": OWNERSHIP_CHANGE,
 }
 
 
@@ -118,14 +134,42 @@ def _forca_por_mudanca(mudanca: dict[str, Any]) -> int:
         return 60 if (absoluto or 0) > 0 else 30
     if tipo == "empresa_adicionada":
         return 35
+    if tipo == "capital_social_aumentou":
+        if percentual is None:
+            return 55
+        if percentual >= 100:
+            return 85
+        if percentual >= 50:
+            return 75
+        if percentual >= 20:
+            return 60
+        return 45
+    if tipo == "cnae_principal_alterado":
+        return 70
+    if tipo == "cnae_secundario_novo":
+        return 55
+    if tipo == "situacao_cadastral_alterada":
+        if mudanca.get("reativacao"):
+            return 65
+        if mudanca.get("inativacao"):
+            return 15  # empresa saindo de operação -- sinal para PARAR de perseguir
+        return 30
+    if tipo == "quadro_societario_alterado":
+        return 45
     return 30
 
 
 def _confianca_por_mudanca(mudanca: dict[str, Any], fonte: str) -> int:
     """'Quão confiável é a evidência de que o evento aconteceu?'"""
     base = 70
-    if fonte in ("Google Places", "BrasilAPI / CNPJ", "BrasilAPI", "BrasilAPI / CVM", "BrasilAPI / B3 + Receita Federal"):
+    if fonte in (
+        "Google Places", "BrasilAPI / CNPJ", "BrasilAPI", "BrasilAPI / CVM",
+        "BrasilAPI / B3 + Receita Federal", FONTE_RECEITA,
+    ):
         base = 80
+    # Registro oficial da Receita é a evidência mais forte que temos hoje.
+    if fonte == FONTE_RECEITA:
+        base = 88
     dias = mudanca.get("days_between")
     if dias is not None and dias <= 1:
         base -= 15  # mudança entre duas coletas quase simultâneas é mais suspeita
@@ -167,6 +211,44 @@ def _titulo_e_descricao(mudanca: dict[str, Any]) -> tuple[str, str]:
         return "Variação de avaliação (rating)", f"Rating mudou de {mudanca['before']} para {mudanca['after']}."
     if tipo == "empresa_adicionada":
         return "Empresa adicionada à base", "Primeira coleta registrada para esta empresa."
+    if tipo == "capital_social_aumentou":
+        percentual = mudanca.get("percentage_change")
+        sufixo = f" (+{percentual}%)" if percentual else ""
+        return (
+            "Aumento de capital social",
+            f"Capital social subiu de R$ {float(mudanca['before']):,.0f} para "
+            f"R$ {float(mudanca['after']):,.0f}{sufixo}, segundo a Receita.",
+        )
+    if tipo == "cnae_principal_alterado":
+        return (
+            "Mudança de atividade principal (CNAE)",
+            f"Atividade principal passou de \"{mudanca['before']}\" para \"{mudanca['after']}\".",
+        )
+    if tipo == "cnae_secundario_novo":
+        novos = mudanca.get("novos") or []
+        lista = "; ".join(str(item) for item in novos) if novos else "novos CNAEs"
+        return "Nova atividade secundária (CNAE)", f"Passou a exercer: {lista}."
+    if tipo == "situacao_cadastral_alterada":
+        if mudanca.get("reativacao"):
+            return "Reativação cadastral na Receita", f"Situação voltou a \"{mudanca['after']}\"."
+        if mudanca.get("inativacao"):
+            return (
+                "Baixa/inaptidão na Receita",
+                f"Situação mudou de \"{mudanca['before']}\" para \"{mudanca['after']}\" "
+                "-- avaliar antes de investir esforço comercial.",
+            )
+        return (
+            "Mudança de situação cadastral",
+            f"Situação mudou de \"{mudanca['before']}\" para \"{mudanca['after']}\".",
+        )
+    if tipo == "quadro_societario_alterado":
+        antes = mudanca.get("socios_antes")
+        depois = mudanca.get("socios_depois")
+        if antes is not None and depois is not None and depois != antes:
+            corpo = f"Número de sócios passou de {antes} para {depois}."
+        else:
+            corpo = "Composição do quadro societário mudou desde a última coleta."
+        return "Mudança no quadro societário", corpo
     return "Mudança detectada", f"Campo {mudanca['field']} mudou de {mudanca['before']} para {mudanca['after']}."
 
 
@@ -178,6 +260,9 @@ def registrar_signal(
     tipo_sinal = _MAPA_TIPO_MUDANCA_PARA_SINAL.get(mudanca["type"])
     if not tipo_sinal:
         return None
+    # Uma mudança pode declarar sua própria fonte (ex.: enriquecimento da
+    # Receita num lead cuja origem é Google/OSM) -- ela vence a fonte do lote.
+    fonte = str(mudanca.get("source") or fonte)
     titulo, descricao = _titulo_e_descricao(mudanca)
     forca = _forca_por_mudanca(mudanca)
     confianca = _confianca_por_mudanca(mudanca, fonte)

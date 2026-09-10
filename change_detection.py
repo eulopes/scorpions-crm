@@ -8,8 +8,13 @@ sem banco e sem HTTP, para ficar 100% testável isoladamente.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
+
+# Fonte das mudanças firmográficas -- usada por sales_signals para calibrar a
+# confiança (registro oficial da Receita é a evidência mais forte que temos).
+FONTE_RECEITA = "Receita Federal (BrasilAPI)"
 
 TIPOS_MUDANCA = (
     "empresa_adicionada",
@@ -24,7 +29,25 @@ TIPOS_MUDANCA = (
     "possivel_nova_unidade",
     "mudanca_nome",
     "alteracao_status",
+    # Sinais firmográficos vindos da Receita (Fase 0).
+    "capital_social_aumentou",
+    "cnae_principal_alterado",
+    "cnae_secundario_novo",
+    "situacao_cadastral_alterada",
+    "quadro_societario_alterado",
 )
+
+
+def _lista_json(valor: Any) -> list[str]:
+    if not valor:
+        return []
+    if isinstance(valor, list):
+        return [str(item) for item in valor]
+    try:
+        dados = json.loads(valor)
+    except (TypeError, ValueError):
+        return []
+    return [str(item) for item in dados] if isinstance(dados, list) else []
 
 
 def _parse_data(valor: Any) -> datetime | None:
@@ -151,6 +174,76 @@ def comparar_snapshots(anterior: dict[str, Any] | None, atual: dict[str, Any]) -
             _mudanca(
                 "possivel_nova_unidade", "units_detected", unidades_antes, unidades_depois, dias,
                 absolute_change=unidades_depois - unidades_antes,
+            )
+        )
+
+    # --- Sinais firmográficos (Receita / BrasilAPI) ---
+
+    try:
+        capital_antes = float(anterior.get("capital_social") or 0)
+        capital_depois = float(atual.get("capital_social") or 0)
+    except (TypeError, ValueError):
+        capital_antes = capital_depois = 0.0
+    # Só o aumento é sinal comercial; redução de capital não interessa aqui.
+    if capital_depois > capital_antes > 0:
+        absoluta, percentual = _variacao(capital_antes, capital_depois)
+        mudancas.append(
+            _mudanca(
+                "capital_social_aumentou", "capital_social", capital_antes, capital_depois, dias,
+                absolute_change=round(absoluta, 2), percentage_change=percentual,
+                source=FONTE_RECEITA,
+            )
+        )
+
+    cnae_antes = str(anterior.get("cnae_principal") or "").strip()
+    cnae_depois = str(atual.get("cnae_principal") or "").strip()
+    if cnae_antes and cnae_depois and cnae_antes != cnae_depois:
+        mudancas.append(
+            _mudanca(
+                "cnae_principal_alterado", "cnae_principal", cnae_antes, cnae_depois, dias,
+                source=FONTE_RECEITA,
+            )
+        )
+
+    secundarios_antes = set(_lista_json(anterior.get("cnaes_secundarios_json")))
+    secundarios_depois = _lista_json(atual.get("cnaes_secundarios_json"))
+    novos_cnaes = [item for item in secundarios_depois if item not in secundarios_antes]
+    # Só reporta quando já havia baseline -- a primeira coleta não é "novidade".
+    if novos_cnaes and secundarios_antes:
+        mudancas.append(
+            _mudanca(
+                "cnae_secundario_novo", "cnaes_secundarios_json",
+                sorted(secundarios_antes), sorted(secundarios_depois), dias,
+                novos=novos_cnaes, source=FONTE_RECEITA,
+            )
+        )
+
+    situacao_antes = str(anterior.get("situacao_cadastral") or "").strip().upper()
+    situacao_depois = str(atual.get("situacao_cadastral") or "").strip().upper()
+    if situacao_antes and situacao_depois and situacao_antes != situacao_depois:
+        mudancas.append(
+            _mudanca(
+                "situacao_cadastral_alterada", "situacao_cadastral",
+                situacao_antes, situacao_depois, dias,
+                reativacao=(situacao_depois == "ATIVA" and situacao_antes != "ATIVA"),
+                inativacao=(situacao_antes == "ATIVA" and situacao_depois != "ATIVA"),
+                source=FONTE_RECEITA,
+            )
+        )
+
+    qsa_antes = str(anterior.get("qsa_hash") or "").strip()
+    qsa_depois = str(atual.get("qsa_hash") or "").strip()
+    if qsa_antes and qsa_depois and qsa_antes != qsa_depois:
+        try:
+            socios_antes = int(anterior.get("qtde_socios") or 0)
+            socios_depois = int(atual.get("qtde_socios") or 0)
+        except (TypeError, ValueError):
+            socios_antes = socios_depois = 0
+        mudancas.append(
+            _mudanca(
+                "quadro_societario_alterado", "qsa_hash", qsa_antes, qsa_depois, dias,
+                socios_antes=socios_antes, socios_depois=socios_depois,
+                source=FONTE_RECEITA,
             )
         )
 
