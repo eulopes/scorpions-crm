@@ -27,7 +27,26 @@ CAMPOS_SNAPSHOT = (
     "company_name", "trade_name", "cnpj", "address", "city", "state",
     "phone", "email", "website", "business_status", "rating", "reviews_count",
     "categories_json", "units_detected",
+    # Campos firmográficos vindos da Receita (BrasilAPI) -- entram no hash para
+    # que uma mudança neles (ex.: aumento de capital) gere um snapshot novo.
+    "capital_social", "porte", "cnae_principal", "cnaes_secundarios_json",
+    "situacao_cadastral", "data_situacao_cadastral", "natureza_juridica",
+    "qsa_hash", "qtde_socios",
 )
+
+# Colunas adicionadas depois da criação original da tabela -- migradas via
+# ALTER TABLE em migrar_esquema() para bancos que já existem.
+_COLUNAS_SNAPSHOT_RECEITA = {
+    "capital_social": "REAL",
+    "porte": "TEXT",
+    "cnae_principal": "TEXT",
+    "cnaes_secundarios_json": "TEXT",
+    "situacao_cadastral": "TEXT",
+    "data_situacao_cadastral": "TEXT",
+    "natureza_juridica": "TEXT",
+    "qsa_hash": "TEXT",
+    "qtde_socios": "INTEGER",
+}
 
 
 def agora_utc() -> datetime:
@@ -79,6 +98,15 @@ def migrar_esquema(conexao: sqlite3.Connection) -> None:
             reviews_count INTEGER,
             categories_json TEXT,
             units_detected INTEGER,
+            capital_social REAL,
+            porte TEXT,
+            cnae_principal TEXT,
+            cnaes_secundarios_json TEXT,
+            situacao_cadastral TEXT,
+            data_situacao_cadastral TEXT,
+            natureza_juridica TEXT,
+            qsa_hash TEXT,
+            qtde_socios INTEGER,
             raw_data_json TEXT,
             FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
         )
@@ -88,6 +116,13 @@ def migrar_esquema(conexao: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_company_snapshots_lead "
         "ON company_snapshots(lead_id, captured_at DESC)"
     )
+    colunas_existentes = {
+        linha["name"]
+        for linha in conexao.execute("PRAGMA table_info(company_snapshots)").fetchall()
+    }
+    for coluna, tipo in _COLUNAS_SNAPSHOT_RECEITA.items():
+        if coluna not in colunas_existentes:
+            conexao.execute(f"ALTER TABLE company_snapshots ADD COLUMN {coluna} {tipo}")
 
 
 def _valor_normalizado(dados: dict[str, Any], campo: str) -> Any:
@@ -134,8 +169,11 @@ def create_company_snapshot(
             INSERT INTO company_snapshots (
                 lead_id, source, captured_at, data_hash, company_name, trade_name, cnpj,
                 address, city, state, phone, email, website, business_status,
-                rating, reviews_count, categories_json, units_detected, raw_data_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                rating, reviews_count, categories_json, units_detected,
+                capital_social, porte, cnae_principal, cnaes_secundarios_json,
+                situacao_cadastral, data_situacao_cadastral, natureza_juridica,
+                qsa_hash, qtde_socios, raw_data_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 lead_id, source, agora, data_hash,
@@ -146,6 +184,12 @@ def create_company_snapshot(
                 dados.get("rating"), dados.get("reviews_count"),
                 _serializar_categorias(dados.get("categories_json")),
                 dados.get("units_detected"),
+                dados.get("capital_social"), dados.get("porte"),
+                dados.get("cnae_principal"),
+                _serializar_categorias(dados.get("cnaes_secundarios_json")),
+                dados.get("situacao_cadastral"), dados.get("data_situacao_cadastral"),
+                dados.get("natureza_juridica"),
+                dados.get("qsa_hash"), dados.get("qtde_socios"),
                 json.dumps(raw_data, ensure_ascii=False, default=str) if raw_data is not None else None,
             ),
         )
