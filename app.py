@@ -96,8 +96,10 @@ from automation import (
 )
 from opportunity_engine import (
     NIVEIS_OPORTUNIDADE,
+    conversion_rate_by_score_range,
     get_opportunity_timeline,
     recommend_next_action,
+    sincronizar_outcomes_pendentes,
 )
 from sales_signals import listar_signals_ativos
 
@@ -158,9 +160,13 @@ def configurar_google_places() -> bool:
 MAX_TENTATIVAS_LOGIN = 5
 BLOQUEIO_LOGIN_SEGUNDOS = 60
 SENHA_TAMANHO_MINIMO = 8
-# "123" pedido não passa no mínimo de 8 caracteres (SENHA_TAMANHO_MINIMO) --
-# provisória com o mesmo espírito (fácil de digitar, óbvia que precisa trocar).
-SENHA_PROVISORIA_INICIAL = "trocar123"
+# Senha provisória das contas iniciais do time.
+# Em deploy compartilhado/produção, defina SCORPIONS_SEED_PASSWORD com um valor
+# privado antes do primeiro start -- assim um reset de banco não recria contas de
+# diretor com uma senha pública conhecida (o repositório é aberto). Sem a
+# variável (uso local, base vazia), cai no valor óbvio-que-precisa-trocar, que
+# não passa no mínimo de 8 caracteres exigido na troca.
+SENHA_PROVISORIA_INICIAL = os.environ.get("SCORPIONS_SEED_PASSWORD", "").strip() or "trocar123"
 
 
 @st.cache_resource
@@ -618,6 +624,8 @@ def iniciar_banco() -> None:
             "opportunity_delta": "INTEGER",
             "last_signal_at": "TEXT",
             "next_intelligence_refresh_at": "TEXT",
+            "motivo_descarte": "TEXT",
+            "entrou_etapa_em": "TEXT",
         }
         for coluna, tipo in novas_colunas.items():
             if coluna not in colunas_existentes:
@@ -1494,8 +1502,20 @@ def zerar_base_leads() -> int:
     return total
 
 
-def atualizar_etapa_funil(lead_id: int, nova_etapa: str):
-    """Atualiza a etapa do funil para um único lead."""
+MOTIVOS_DESCARTE = (
+    "Preço", "Prazo", "Concorrente", "Sem orçamento",
+    "Não é decisor", "Sem retorno", "Fora do escopo", "Outro",
+)
+LIMITE_DIAS_VISTORIA_LENTA = 3
+
+
+def atualizar_etapa_funil(lead_id: int, nova_etapa: str, motivo_descarte: str | None = None):
+    """Atualiza a etapa do funil para um único lead.
+
+    `entrou_etapa_em` é regravado a cada mudança de etapa -- é o que permite
+    calcular "há quanto tempo esse lead está parado aqui" (ex.: cotação lenta
+    em Vistoria Técnica é uma das causas de perda mais citadas e mais
+    escondidas, segundo pesquisa de win/loss em vendas B2B)."""
     if nova_etapa not in STATUS:
         raise ValueError(f"Etapa inválida: {nova_etapa}")
     if not _lead_dentro_do_escopo(lead_id):
@@ -1506,13 +1526,17 @@ def atualizar_etapa_funil(lead_id: int, nova_etapa: str):
             "SELECT nome_empresa, status FROM leads WHERE id = ?", (lead_id,)
         ).fetchone()
         conexao.execute(
-            "UPDATE leads SET status = ?, atualizado_em = ? WHERE id = ?",
-            (nova_etapa, agora, lead_id),
+            "UPDATE leads SET status = ?, atualizado_em = ?, entrou_etapa_em = ?, "
+            "motivo_descarte = COALESCE(?, motivo_descarte) WHERE id = ?",
+            (nova_etapa, agora, agora, motivo_descarte, lead_id),
         )
     if lead and lead["status"] != nova_etapa:
+        descricao = f"'{lead['nome_empresa']}' movido de '{lead['status']}' para '{nova_etapa}'."
+        if motivo_descarte:
+            descricao += f" Motivo: {motivo_descarte}."
         registrar_atividade(
             "etapa_alterada",
-            f"'{lead['nome_empresa']}' movido de '{lead['status']}' para '{nova_etapa}'.",
+            descricao,
             lead_id,
             usuario=st.session_state.get("usuario_logado", "sistema"),
         )
@@ -1579,6 +1603,28 @@ def _render_kanban_card(lead: pd.Series, etapa_atual: str) -> None:
         f"</span>"
     )
 
+    dias_na_etapa = None
+    entrou_etapa_em_str = lead.get("entrou_etapa_em")
+    if entrou_etapa_em_str and pd.notna(entrou_etapa_em_str):
+        try:
+            entrou_em = pd.to_datetime(entrou_etapa_em_str, utc=True)
+            dias_na_etapa = (pd.Timestamp.now(tz="UTC") - entrou_em).days
+        except (ValueError, TypeError):
+            dias_na_etapa = None
+    # Cotação lenta (Vistoria Técnica parada) é uma das causas de perda mais
+    # citadas e mais "invisíveis" em pesquisas de win/loss -- o vendedor culpa
+    # preço, mas o motivo real é demora. Sinalizamos direto no card.
+    vistoria_lenta = (
+        etapa_atual == "Vistoria Técnica / Diagnóstico"
+        and dias_na_etapa is not None
+        and dias_na_etapa > LIMITE_DIAS_VISTORIA_LENTA
+    )
+    etapa_html = (
+        f'<span class="kanban-fact{" kanban-fact--overdue" if vistoria_lenta else ""}">'
+        f'<span>Nesta etapa</span><strong>{dias_na_etapa} dia(s)</strong>'
+        f"</span>"
+    ) if dias_na_etapa is not None else ""
+
     with st.container(key=f"kanban_card_{int(lead['id'])}"):
         # Os fatos ficam concatenados numa linha só (sem quebra entre eles):
         # quando valor_html fica vazio (lead sem proposta), uma linha em branco
@@ -1592,12 +1638,14 @@ def _render_kanban_card(lead: pd.Series, etapa_atual: str) -> None:
                 <div class="score-badge {score_classe}">{score_str}</div>
               </div>
               <div class="kanban-location">{escape(cidade)} · {escape(nicho)}</div>
-              <div class="kanban-facts">{valor_html}{proximo_contato_html}</div>
+              <div class="kanban-facts">{valor_html}{proximo_contato_html}{etapa_html}</div>
               <div class="kanban-owner">Responsável · {escape(str(responsavel or 'Não atribuído'))}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
+        if vistoria_lenta:
+            st.caption("⚠️ Parado há mais tempo que o normal na vistoria — risco de perda por demora na cotação.")
 
         with st.expander("Mais detalhes", type="compact"):
             st.caption(f"Segmento ICP: {icp}")
@@ -1607,15 +1655,40 @@ def _render_kanban_card(lead: pd.Series, etapa_atual: str) -> None:
 
         col_mover, col_abrir = st.columns([3, 1])
         with col_mover:
+            _versao_move = st.session_state.get(f"versao_move_{lead['id']}", 0)
             nova_etapa = st.selectbox(
                 "Mover para",
                 options=STATUS,
                 index=STATUS.index(etapa_atual),
-                key=f"move_{lead['id']}",
+                key=f"move_{lead['id']}_{_versao_move}",
                 label_visibility="collapsed",
             )
-            if nova_etapa != etapa_atual:
+            if nova_etapa != etapa_atual and nova_etapa == "Descartado":
+                # Motivo obrigatório antes de confirmar -- é o dado que falta pra
+                # análise de win/loss (por que perdemos, não só que perdemos).
+                motivo = st.selectbox(
+                    "Motivo do descarte", [""] + list(MOTIVOS_DESCARTE),
+                    key=f"motivo_descarte_input_{lead['id']}",
+                )
+                col_confirma, col_cancela = st.columns(2)
+                if col_confirma.button(
+                    "Confirmar descarte", key=f"confirmar_descarte_{lead['id']}",
+                    disabled=not motivo, width="stretch",
+                ):
+                    atualizar_etapa_funil(int(lead["id"]), nova_etapa, motivo_descarte=motivo)
+                    # Fecha o loop no clique, não só na varredura do worker: o
+                    # desfecho é gravado com o score que o lead tinha agora.
+                    sincronizar_outcomes_pendentes()
+                    st.cache_data.clear()
+                    st.toast("Lead descartado.", icon=":material/check_circle:")
+                    st.rerun()
+                if col_cancela.button("Cancelar", key=f"cancelar_descarte_{lead['id']}", width="stretch"):
+                    st.session_state[f"versao_move_{lead['id']}"] = _versao_move + 1
+                    st.rerun()
+            elif nova_etapa != etapa_atual:
                 atualizar_etapa_funil(int(lead["id"]), nova_etapa)
+                if nova_etapa in ("Fechado / Contrato", "Descartado"):
+                    sincronizar_outcomes_pendentes()
                 st.cache_data.clear()
                 st.toast(f"Lead movido para \"{nova_etapa}\".", icon=":material/check_circle:")
                 st.rerun()
@@ -2009,6 +2082,56 @@ if aba_dashboard:
                         st.session_state["navegacao_solicitada"] = "Empresas"
                         st.rerun()
 
+        # Radar no Dashboard: as oportunidades que o motor já pontuou não podem
+        # ficar só numa aba separada -- quem abre o CRM de manhã tem que ver, na
+        # primeira tela, quais empresas valem a abordagem de hoje e por quê.
+        if "opportunity_score" in dados.columns:
+            _radar_dash = dados[
+                dados["opportunity_score"].notna()
+                & ~dados["status"].isin(["Fechado / Contrato", "Descartado"])
+            ].copy()
+            if not _radar_dash.empty:
+                _radar_dash = _radar_dash.sort_values(
+                    by=["opportunity_score", "opportunity_delta"],
+                    ascending=[False, False],
+                ).head(4)
+                st.markdown(
+                    '<div class="section-title" style="margin-top:0.3rem;">'
+                    'Radar · principais oportunidades</div>',
+                    unsafe_allow_html=True,
+                )
+                _cores_nivel = {
+                    "Crítica": "#ff8f8f", "Alta": "#F3C75F",
+                    "Boa": "#7DD3FC", "Moderada": "#8A94A6", "Baixa": "#5A6373",
+                }
+                for _coluna_radar, (_, _op) in zip(
+                    st.columns(len(_radar_dash)), _radar_dash.iterrows()
+                ):
+                    _nivel_op = str(_op.get("opportunity_level") or "Baixa")
+                    _score_op = int(_op.get("opportunity_score") or 0)
+                    _delta_op = int(_op.get("opportunity_delta") or 0)
+                    _delta_txt = (
+                        f' <span style="color:#35D07F">▲{_delta_op}</span>' if _delta_op > 0
+                        else (f' <span style="color:#ff8f8f">▼{abs(_delta_op)}</span>' if _delta_op < 0 else "")
+                    )
+                    _why = str(_op.get("why_now") or "").strip()
+                    if len(_why) > 120:
+                        _why = _why[:117] + "…"
+                    with _coluna_radar:
+                        st.markdown(
+                            f"""
+                            <div class="attn-card">
+                              <div class="attn-kicker" style="color:{_cores_nivel.get(_nivel_op, '#8A94A6')}">{escape(_nivel_op)} · SCORE {_score_op}{_delta_txt}</div>
+                              <div class="attn-title">{escape(str(_op.get('nome_empresa') or '—'))}</div>
+                              <div class="attn-note">{escape(_why) if _why else 'Sem sinal comercial ativo ainda — monitorando.'}</div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+                if st.button("Abrir Radar", key="dash_abrir_radar"):
+                    st.session_state["navegacao_solicitada"] = "Radar"
+                    st.rerun()
+
         st.markdown('<div class="section-title" style="margin-top:0.3rem;">Prioridades de hoje</div>', unsafe_allow_html=True)
 
         cartoes_atencao: list[tuple[str, str, str, str]] = []
@@ -2087,6 +2210,51 @@ if aba_dashboard:
                 "Tudo em dia",
                 "Nenhuma pendência operacional identificada com os dados disponíveis.",
                 compacto=True,
+            )
+
+        # Fila de ação real (não só estatística): quem contatar hoje, em que
+        # ordem e por quê -- 80% das vendas B2B precisam de 5+ toques, e isso
+        # só acontece se existir uma lista concreta, não um número solto.
+        datas_entrou_etapa = pd.to_datetime(dados.get("entrou_etapa_em"), errors="coerce", utc=True)
+        dias_na_etapa_serie = (pd.Timestamp.now(tz="UTC") - datas_entrou_etapa).dt.days
+        vistoria_parada = dados[
+            (dados["status"] == "Vistoria Técnica / Diagnóstico")
+            & dias_na_etapa_serie.notna()
+            & (dias_na_etapa_serie > LIMITE_DIAS_VISTORIA_LENTA)
+        ]
+
+        fila_hoje: list[dict[str, Any]] = []
+        for indice, linha in retornos_atrasados.iterrows():
+            fila_hoje.append({
+                "prioridade": 0, "Empresa": linha["nome_empresa"], "Motivo": "Retorno atrasado",
+                "Ação sugerida": "Retomar contato hoje",
+                "Responsável": (linha.get("responsavel_nome") if pd.notna(linha.get("responsavel_nome")) else "—"),
+            })
+        for indice, linha in vistoria_parada.iterrows():
+            dias = dias_na_etapa_serie.loc[indice]
+            fila_hoje.append({
+                "prioridade": 1, "Empresa": linha["nome_empresa"],
+                "Motivo": f"Vistoria parada há {int(dias)} dia(s)",
+                "Ação sugerida": "Agilizar a cotação",
+                "Responsável": (linha.get("responsavel_nome") if pd.notna(linha.get("responsavel_nome")) else "—"),
+            })
+        for indice, linha in sem_proximo_contato.iterrows():
+            fila_hoje.append({
+                "prioridade": 2, "Empresa": linha["nome_empresa"], "Motivo": "Sem próximo contato definido",
+                "Ação sugerida": "Definir a próxima ação",
+                "Responsável": (linha.get("responsavel_nome") if pd.notna(linha.get("responsavel_nome")) else "—"),
+            })
+
+        if fila_hoje:
+            fila_hoje.sort(key=lambda item: item["prioridade"])
+            st.markdown(
+                '<div class="section-title" style="margin-top:0.8rem;">Fila de contato de hoje</div>',
+                unsafe_allow_html=True,
+            )
+            st.dataframe(
+                pd.DataFrame(fila_hoje[:10]).drop(columns=["prioridade"]),
+                width="stretch",
+                hide_index=True,
             )
 
     if total:
@@ -2201,6 +2369,75 @@ if aba_dashboard:
                         "descricao": st.column_config.TextColumn("Detalhes"),
                     },
                 )
+
+        with st.expander("Análise de conversão e perdas"):
+            # "Fechar o loop": todo lead que virou Fechado/Descartado deixa um
+            # registro em opportunity_outcomes com o score que tinha na entrada.
+            # O worker já faz isso periodicamente; aqui garantimos que a tela
+            # nunca fica vazia só porque o worker não rodou ainda.
+            try:
+                sincronizar_outcomes_pendentes()
+            except Exception:  # noqa: BLE001 -- análise nunca deve derrubar o dashboard
+                pass
+
+            st.caption(
+                "Correlação observada entre o Opportunity Score no momento da entrada "
+                "e o desfecho real. Não é relação de causa — é o placar do modelo."
+            )
+            faixas_conversao = conversion_rate_by_score_range()
+            tem_amostra = any(linha["total"] for linha in faixas_conversao)
+            if tem_amostra:
+                tabela_conv = pd.DataFrame(
+                    {
+                        "Faixa de score": linha["faixa"],
+                        "Fechados / Total": f"{linha['fechados']} / {linha['total']}",
+                        "Taxa de conversão": (
+                            f"{linha['taxa_conversao']:.0f}%"
+                            if linha["taxa_conversao"] is not None else "—"
+                        ),
+                        "Ticket médio": (
+                            f"R$ {linha['ticket_medio']:,.0f}"
+                            if linha["ticket_medio"] else "—"
+                        ),
+                    }
+                    for linha in faixas_conversao
+                )
+                st.dataframe(tabela_conv, width="stretch", hide_index=True)
+                st.caption(
+                    "Base inteira, todos os responsáveis — o histórico de desfechos "
+                    "ainda não é recortado por carteira."
+                )
+            else:
+                st.info(
+                    "Ainda sem histórico suficiente: nenhum lead foi para "
+                    "\"Fechado / Contrato\" ou \"Descartado\" depois que o "
+                    "Opportunity Score passou a ser calculado."
+                )
+
+            descartados = dados[dados["status"] == "Descartado"]
+            if not descartados.empty:
+                st.markdown(
+                    '<div class="section-title" style="margin-top:0.6rem;">Por que perdemos</div>',
+                    unsafe_allow_html=True,
+                )
+                motivos = (
+                    descartados["motivo_descarte"].fillna("").replace("", "Sem motivo registrado")
+                    if "motivo_descarte" in descartados.columns
+                    else pd.Series(["Sem motivo registrado"] * len(descartados))
+                )
+                tabela_motivos = (
+                    motivos.value_counts()
+                    .rename_axis("Motivo")
+                    .rename("Descartes")
+                    .reset_index()
+                )
+                st.dataframe(tabela_motivos, width="stretch", hide_index=True)
+                sem_motivo = int((motivos == "Sem motivo registrado").sum())
+                if sem_motivo:
+                    st.caption(
+                        f"{sem_motivo} descarte(s) sem motivo — são anteriores à "
+                        "obrigatoriedade do campo ou vieram de importação."
+                    )
     else:
         _clique_vazio_dash = render_empty_state(
             "Vamos começar?",

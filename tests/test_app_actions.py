@@ -144,7 +144,7 @@ class AcoesReaisTest(unittest.TestCase):
             at.run(timeout=30)
             self.assertEqual([], list(at.exception))
 
-            at.selectbox(key=f"move_{self.lead_mover_id}").set_value("Contato / Qualificação")
+            at.selectbox(key=f"move_{self.lead_mover_id}_0").set_value("Contato / Qualificação")
             at.run(timeout=30)
             self.assertEqual([], list(at.exception))
 
@@ -153,6 +153,26 @@ class AcoesReaisTest(unittest.TestCase):
                     "SELECT status FROM leads WHERE id = ?", (self.lead_mover_id,)
                 ).fetchone()[0]
             self.assertEqual("Contato / Qualificação", status)
+
+        with self.subTest(acao="descartar lead exige motivo"):
+            at.selectbox(key=f"move_{self.lead_mover_id}_0").set_value("Descartado")
+            at.run(timeout=30)
+            self.assertEqual([], list(at.exception))
+
+            botao_confirma = at.button(key=f"confirmar_descarte_{self.lead_mover_id}")
+            self.assertTrue(botao_confirma.disabled, "botao de confirmar deveria estar desabilitado sem motivo")
+
+            at.selectbox(key=f"motivo_descarte_input_{self.lead_mover_id}").set_value("Preço")
+            at.run(timeout=30)
+            at.button(key=f"confirmar_descarte_{self.lead_mover_id}").click()
+            at.run(timeout=30)
+            self.assertEqual([], list(at.exception))
+
+            with sqlite3.connect(self.database) as conexao:
+                linha = conexao.execute(
+                    "SELECT status, motivo_descarte FROM leads WHERE id = ?", (self.lead_mover_id,)
+                ).fetchone()
+            self.assertEqual(("Descartado", "Preço"), linha)
 
         with self.subTest(acao="excluir lead com confirmacao"):
             at.radio(key="navegacao_principal").set_value("Empresas")

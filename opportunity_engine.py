@@ -77,6 +77,11 @@ def migrar_esquema(conexao: sqlite3.Connection) -> None:
         )
         """
     )
+    colunas_outcomes = {
+        linha["name"] for linha in conexao.execute("PRAGMA table_info(opportunity_outcomes)").fetchall()
+    }
+    if "motivo_perda" not in colunas_outcomes:
+        conexao.execute("ALTER TABLE opportunity_outcomes ADD COLUMN motivo_perda TEXT")
 
 
 def _nivel_por_pontuacao(pontuacao: int) -> str:
@@ -428,14 +433,15 @@ def sincronizar_outcomes_pendentes() -> int:
                 INSERT INTO opportunity_outcomes (
                     lead_id, opportunity_score_at_entry, fit_score_at_entry,
                     intent_score_at_entry, timing_score_at_entry, signals_json,
-                    outcome, value, closed_at, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    outcome, value, closed_at, created_at, motivo_perda
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     lead["id"], lead.get("opportunity_score"), lead.get("fit_score"),
                     lead.get("intent_score"), lead.get("timing_score"),
                     json.dumps([s["signal_type"] for s in sinais], ensure_ascii=False),
                     outcome, lead.get("valor_proposta"), lead.get("atualizado_em"), iso_utc(),
+                    lead.get("motivo_descarte") if outcome == "lost" else None,
                 ),
             )
         registrados += 1

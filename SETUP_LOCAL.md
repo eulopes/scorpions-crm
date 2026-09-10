@@ -33,15 +33,11 @@ O worker (campanhas agendadas, atualização de inteligência de oportunidade) s
 
 ## 3. Primeiro acesso
 
-O banco novo já vem com 3 contas de diretor (acesso total) pré-criadas:
+O banco novo já vem com 3 contas de diretor (acesso total) pré-criadas: `lopes`, `moroni` e `junior`.
 
-| Usuário | Senha provisória |
-| --- | --- |
-| `lopes` | `trocar123` |
-| `moroni` | `trocar123` |
-| `junior` | `trocar123` |
+**Senha inicial — somente para ambiente local:** `trocar123`. Troque assim que logar, em **Trocar senha** na barra lateral (abaixo do seu nome, acima de "Sair").
 
-Troque a senha assim que logar, em **Trocar senha** na barra lateral (abaixo do seu nome, acima de "Sair").
+> **Deploy compartilhado / produção:** defina a variável de ambiente `SCORPIONS_SEED_PASSWORD` com um valor privado **antes do primeiro start**. Sem ela, essas contas nascem com a senha local acima — que nunca deve valer em um ambiente exposto. As senhas de produção já em uso não são afetadas por isso (a semente só cria conta que ainda não existe).
 
 Alternativa legada: `.streamlit/secrets.toml` (copie de `secrets.toml.example`) aceita uma seção `[AUTH_USERS]` com `usuario = "hash bcrypt"` — gere o hash com `python scripts/gerar_hash_senha.py`. Não é necessário para simplesmente rodar o projeto.
 

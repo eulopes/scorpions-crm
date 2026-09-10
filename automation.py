@@ -375,6 +375,8 @@ def iniciar_banco_automacao() -> None:
             "opportunity_delta": "INTEGER",
             "last_signal_at": "TEXT",
             "next_intelligence_refresh_at": "TEXT",
+            "motivo_descarte": "TEXT",
+            "entrou_etapa_em": "TEXT",
         }.items():
             if coluna not in colunas_leads:
                 conexao.execute(f"ALTER TABLE leads ADD COLUMN {coluna} {tipo}")
