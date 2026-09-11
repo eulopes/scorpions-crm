@@ -17,6 +17,9 @@ from typing import Any
 FONTE_RECEITA = "Receita Federal (BrasilAPI)"
 # Dump mensal de Dados Abertos (Fase 1) -- mesma autoridade, cadência mensal.
 FONTE_RECEITA_DUMP = "Receita Federal (Dados Abertos)"
+# Alvará de obras (Fase 2) -- fonte municipal, casada por endereço/nome (fuzzy),
+# por isso a confiança parte de um patamar mais baixo que a Receita.
+FONTE_OBRAS = "Prefeitura (Alvará de Obras)"
 
 TIPOS_MUDANCA = (
     "empresa_adicionada",

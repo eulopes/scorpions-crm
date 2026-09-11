@@ -14,7 +14,7 @@ import sqlite3
 from datetime import timedelta
 from typing import Any
 
-from change_detection import FONTE_RECEITA, FONTE_RECEITA_DUMP
+from change_detection import FONTE_OBRAS, FONTE_RECEITA, FONTE_RECEITA_DUMP
 from company_history import agora_utc, conectar, iso_utc
 
 NEW_BRANCH = "NEW_BRANCH"
@@ -35,6 +35,8 @@ CORE_ACTIVITY_CHANGE = "CORE_ACTIVITY_CHANGE"
 NEW_CNAE = "NEW_CNAE"
 REGISTRY_STATUS_CHANGE = "REGISTRY_STATUS_CHANGE"
 OWNERSHIP_CHANGE = "OWNERSHIP_CHANGE"
+# Alvará de obras (Fase 2).
+OBRA_ATIVA = "OBRA_ATIVA"
 
 # Preparado para fontes futuras -- não implementados por não haver ainda uma
 # fonte real capaz de sustentar a evidência (regra explícita: não inventar).
@@ -53,6 +55,8 @@ _MEIA_VIDA_DIAS = {
     # ou pivô de atividade repercute em investimento por vários meses.
     CAPITAL_INCREASE: 120, CORE_ACTIVITY_CHANGE: 90, NEW_CNAE: 90,
     REGISTRY_STATUS_CHANGE: 60, OWNERSHIP_CHANGE: 90,
+    # Obra dura meses -- janela comercial tão longa quanto o próprio canteiro.
+    OBRA_ATIVA: 150,
 }
 _VALIDADE_DIAS_PADRAO = 90
 
@@ -74,6 +78,8 @@ _MAPA_TIPO_MUDANCA_PARA_SINAL = {
     # Dump mensal da Receita (Fase 1).
     "nova_filial_receita": NEW_BRANCH,
     "novo_estabelecimento_receita": NEW_BRANCH,
+    # Alvará de obras (Fase 2).
+    "obra_ativa": OBRA_ATIVA,
 }
 
 
@@ -164,6 +170,15 @@ def _forca_por_mudanca(mudanca: dict[str, Any]) -> int:
         return 90
     if tipo == "novo_estabelecimento_receita":
         return 80
+    if tipo == "obra_ativa":
+        area = float(mudanca.get("area") or 0)
+        if area >= 3000:
+            return 90
+        if area >= 1000:
+            return 80
+        if area >= 500:
+            return 65
+        return 50
     return 30
 
 
@@ -178,6 +193,11 @@ def _confianca_por_mudanca(mudanca: dict[str, Any], fonte: str) -> int:
     # Registro oficial da Receita é a evidência mais forte que temos hoje.
     if fonte in (FONTE_RECEITA, FONTE_RECEITA_DUMP):
         base = 88
+    if fonte == FONTE_OBRAS:
+        # Casamento fuzzy (endereço/nome) pesa menos que registro direto por CNPJ.
+        base = 75
+        if mudanca.get("match_confianca") == "media":
+            base -= 15
     dias = mudanca.get("days_between")
     if dias is not None and dias <= 1:
         base -= 15  # mudança entre duas coletas quase simultâneas é mais suspeita
@@ -273,6 +293,23 @@ def _titulo_e_descricao(mudanca: dict[str, Any]) -> tuple[str, str]:
             + (f" em {local}" if local else "")
             + ". Estrutura sendo montada agora.",
         )
+    if tipo == "obra_ativa":
+        depois = mudanca.get("after") if isinstance(mudanca.get("after"), dict) else {}
+        local = str(depois.get("local") or "").strip()
+        area = mudanca.get("area")
+        tipo_obra = {
+            "execucao": "execução", "aprovacao": "aprovação", "reforma": "reforma",
+            "regularizacao": "regularização", "habite-se": "habite-se",
+        }.get(mudanca.get("tipo_obra"), "obra")
+        corpo = f"Alvará de {tipo_obra} emitido"
+        if area:
+            corpo += f" para {float(area):,.0f} m²"
+        if local:
+            corpo += f" em {local}"
+        corpo += "."
+        if mudanca.get("match_confianca") == "media":
+            corpo += " Empresa candidata pelo endereço/nome -- confirme o ocupante antes do contato."
+        return "Obra ativa detectada", corpo
     return "Mudança detectada", f"Campo {mudanca['field']} mudou de {mudanca['before']} para {mudanca['after']}."
 
 
