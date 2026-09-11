@@ -23,6 +23,7 @@ ARQUIVOS_DE_TESTE = [
     "tests.test_app_actions",
     "tests.test_opportunity_engine",
     "tests.test_receita_snapshot",
+    "tests.test_receita_dump",
 ]
 
 

@@ -17,6 +17,11 @@ __pycache__/
 *.db-journal
 scorpions_base_legacy_backup.db
 
+# Dump da Receita (Fase 1) -- DuckDB e cache dos ~15 GB mensais
+*.duckdb
+*.duckdb.wal
+.receita_cache/
+
 # Logs
 *.log
 *.stdout.log
