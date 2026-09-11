@@ -1,16 +1,19 @@
 """Fase 2 -- casamento alvará -> empresa.
 
 O alvará é indexado por imóvel (endereço + SQL do IPTU), nunca por CNPJ. Este
-módulo resolve "quem opera neste endereço?" por comparação de endereço, em três
-estratégias, da mais para a menos confiável:
+módulo resolve "quem opera neste endereço?" em ordem de confiança:
 
-  1. contra a base de ``leads`` que já temos  -> sinal no lead existente
-  2. contra os estabelecimentos do dump da Receita -> lead novo candidato
-  3. nada casou -> fila "obra sem ocupante identificado" (revisão humana)
+  1. nome do proprietário (SISSEL/SP costuma trazer a razão social de quem
+     pediu o alvará) bate com um lead que já temos       -> em_lead, alta
+  2. endereço bate com um lead que já temos               -> em_lead, alta
+  3. nome do proprietário bate com um estabelecimento do
+     dump da Receita                                      -> novo_de_receita, media
+  4. endereço bate com um estabelecimento do dump          -> novo_de_receita, media
+  5. nada casou                                            -> sem_ocupante (revisão humana)
 
 Função pura: recebe listas/índices já montados pelo chamador, não toca banco.
-Endereço brasileiro é sujo, então o casamento é por *assinatura* (conjunto de
-tokens do logradouro + número + município), não string exata.
+Endereço e razão social brasileiros são sujos, então os dois casamentos são
+por *assinatura* (conjuntos normalizados), nunca por string exata.
 """
 
 from __future__ import annotations
@@ -93,6 +96,55 @@ def _combina(
     return len(intersecao) / len(uniao) >= 0.6
 
 
+_SUFIXOS_SOCIETARIOS = {
+    "ltda", "me", "epp", "eireli", "sa", "s a", "sociedade", "empresarial",
+    "individual", "limitada", "cia", "companhia",
+}
+
+
+def normalizar_nome_empresa(nome: Any) -> frozenset[str]:
+    """Tokens do nome fantasia/razão social, sem sufixo societário nem
+    pontuação -- 'Aspect Midia Ind Eletr Comercio e Serv LTDA' e 'ASPECT
+    MIDIA IND. ELETR. COMERCIO E SERVICOS LTDA' geram o mesmo núcleo."""
+    tokens = set(_norm(nome).split()) - _STOPWORDS - _SUFIXOS_SOCIETARIOS
+    return frozenset(t for t in tokens if len(t) >= 3)
+
+
+def _nomes_combinam(a: frozenset[str], b: frozenset[str]) -> bool:
+    if not a or not b:
+        return False
+    intersecao = a & b
+    if a <= b or b <= a:
+        return len(intersecao) >= 1
+    uniao = a | b
+    return len(intersecao) / len(uniao) >= 0.7
+
+
+def indexar_leads_por_nome(leads: Iterable[dict[str, Any]]) -> list[tuple[frozenset[str], int]]:
+    """[(nome normalizado, lead_id)] a partir de nome_empresa/razao_social."""
+    indice = []
+    for lead in leads:
+        for campo in ("nome_empresa", "razao_social"):
+            assinatura = normalizar_nome_empresa(lead.get(campo))
+            if assinatura:
+                indice.append((assinatura, int(lead["id"])))
+    return indice
+
+
+def indexar_estabelecimentos_por_nome(
+    estabelecimentos: Iterable[dict[str, Any]],
+) -> list[tuple[frozenset[str], dict[str, Any]]]:
+    """[(nome normalizado, estabelecimento)] a partir do nome_fantasia do
+    dump da Receita -- a Fase 1 não carrega razão social (arquivo Empresas
+    não é lido ainda), então essa camada é mais fraca que a de leads."""
+    indice = []
+    for est in estabelecimentos:
+        assinatura = normalizar_nome_empresa(est.get("nome_fantasia"))
+        if assinatura:
+            indice.append((assinatura, est))
+    return indice
+
+
 def indexar_leads(leads: Iterable[dict[str, Any]]) -> list[tuple[tuple, int]]:
     """[(assinatura, lead_id)] a partir de linhas de ``leads`` (id, endereco, cidade)."""
     indice = []
@@ -120,32 +172,51 @@ def casar_alvaras(
     *,
     indice_leads: list[tuple[tuple, int]],
     indice_estabelecimentos: list[tuple[tuple, dict[str, Any]]] | None = None,
+    indice_leads_nome: list[tuple[frozenset[str], int]] | None = None,
+    indice_estabelecimentos_nome: list[tuple[frozenset[str], dict[str, Any]]] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Classifica cada alvará em em_lead / novo_de_receita / sem_ocupante."""
+    """Classifica cada alvará em em_lead / novo_de_receita / sem_ocupante,
+    tentando nome do proprietário antes de endereço (mais confiável quando
+    o alvará traz a razão social de quem pediu)."""
     indice_estabelecimentos = indice_estabelecimentos or []
+    indice_leads_nome = indice_leads_nome or []
+    indice_estabelecimentos_nome = indice_estabelecimentos_nome or []
     em_lead: list[dict[str, Any]] = []
     novo_de_receita: list[dict[str, Any]] = []
     sem_ocupante: list[dict[str, Any]] = []
 
     for alvara in alvaras:
+        nome_alvara = normalizar_nome_empresa(alvara.get("proprietario"))
         assinatura = assinatura_endereco(
             alvara.get("endereco"), alvara.get("numero"), alvara.get("municipio_nome")
         )
-        if not assinatura[0]:
-            sem_ocupante.append({"alvara": alvara, "motivo": "endereço insuficiente"})
-            continue
 
-        lead_id = next((lid for assin, lid in indice_leads if _combina(assinatura, assin)), None)
+        lead_id = next((lid for nome, lid in indice_leads_nome if _nomes_combinam(nome_alvara, nome)), None)
         if lead_id is not None:
-            em_lead.append({"alvara": alvara, "lead_id": lead_id, "confianca": "alta"})
+            em_lead.append({"alvara": alvara, "lead_id": lead_id, "confianca": "alta", "por": "nome"})
             continue
 
-        est = next((e for assin, e in indice_estabelecimentos if _combina(assinatura, assin)), None)
+        if assinatura[0]:
+            lead_id = next((lid for assin, lid in indice_leads if _combina(assinatura, assin)), None)
+            if lead_id is not None:
+                em_lead.append({"alvara": alvara, "lead_id": lead_id, "confianca": "alta", "por": "endereco"})
+                continue
+
+        est = next((e for nome, e in indice_estabelecimentos_nome if _nomes_combinam(nome_alvara, nome)), None)
         if est is not None:
-            novo_de_receita.append({"alvara": alvara, "estabelecimento": est, "confianca": "media"})
+            novo_de_receita.append({"alvara": alvara, "estabelecimento": est, "confianca": "media", "por": "nome"})
             continue
 
-        sem_ocupante.append({"alvara": alvara, "motivo": "sem empresa no endereço"})
+        if assinatura[0]:
+            est = next((e for assin, e in indice_estabelecimentos if _combina(assinatura, assin)), None)
+            if est is not None:
+                novo_de_receita.append(
+                    {"alvara": alvara, "estabelecimento": est, "confianca": "media", "por": "endereco"}
+                )
+                continue
+
+        motivo = "sem empresa no endereço" if assinatura[0] else "endereço insuficiente"
+        sem_ocupante.append({"alvara": alvara, "motivo": motivo})
 
     return {
         "em_lead": em_lead,
