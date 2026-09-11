@@ -27,7 +27,7 @@ import requests
 
 from change_detection import FONTE_RECEITA_DUMP
 from crm_strategy import classificar_icp
-from niche_sources import _sessao_resiliente
+from niche_sources import _sessao_resiliente, normalizar_cnpj
 
 APP_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv("RECEITA_DUMP_DB", str(APP_DIR / "receita_dump.duckdb")))
@@ -450,6 +450,14 @@ def candidatos_do_diff(
 
     for evento in eventos:
         tipo = evento["tipo"]
+        # CNPJ do dump é sempre estruturalmente válido; um que não passa na
+        # verificação de dígitos indica parsing errado ou linha corrompida --
+        # não dá pra casar nem contatar, então é descartado.
+        cnpj_valido = normalizar_cnpj(evento.get("cnpj"))
+        if not cnpj_valido:
+            continue
+        evento = {**evento, "cnpj": cnpj_valido}
+
         if tipo == "BAIXA":
             supressoes.append(evento["cnpj"])
             continue

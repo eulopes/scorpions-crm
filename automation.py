@@ -364,6 +364,10 @@ def iniciar_banco_automacao() -> None:
             "valor_proposta": "REAL",
             "alerta_vencido_em": "TEXT",
             "proximo_contato": "TEXT",
+            # Duplicado de app.iniciar_banco (RBAC): salvar_leads_no_banco grava
+            # nesta coluna, então ela precisa existir mesmo quando o schema é
+            # criado só pelo caminho de automation (worker, scripts, testes).
+            "responsavel_usuario_id": "INTEGER",
             "fit_score": "INTEGER",
             "intent_score": "INTEGER",
             "timing_score": "INTEGER",

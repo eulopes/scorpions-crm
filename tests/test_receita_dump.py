@@ -43,6 +43,21 @@ def _defaults(**over: str) -> dict[str, str]:
     return dict(over)
 
 
+def _cnpj(basico8: str, ordem: str = "0001") -> str:
+    """Compõe um CNPJ de 14 dígitos com dígitos verificadores corretos."""
+    base = f"{int(basico8):08d}{int(ordem):04d}"
+
+    def dv(seq: str) -> str:
+        pesos = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+        pesos = pesos[-len(seq):]
+        resto = sum(int(d) * p for d, p in zip(seq, pesos)) % 11
+        return "0" if resto < 2 else str(11 - resto)
+
+    d1 = dv(base)
+    d2 = dv(base + d1)
+    return base + d1 + d2
+
+
 def _zip_estab(linhas: list[str], nome_membro: str = "K3241.ESTABELE") -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -231,7 +246,7 @@ class DiffTest(unittest.TestCase):
 
 def _evento(tipo: str, **over) -> dict:
     base = {
-        "tipo": tipo, "cnpj": "11111111000101", "cnpj_basico": "11111111",
+        "tipo": tipo, "cnpj": _cnpj("11111111", "0002"), "cnpj_basico": "11111111",
         "matriz_filial": "2", "nome_fantasia": "CD SOROCABA", "situacao": "ATIVA",
         "uf": "SP", "municipio_codigo": "7145", "municipio_nome": "SOROCABA",
         "cnae_principal": "5211701", "cnae_descricao": "Armazéns gerais - emissão de warrant",
@@ -267,9 +282,15 @@ class MatcherTest(unittest.TestCase):
         self.assertEqual(incluido[0]["lead"]["segmento_icp"], "Não classificado")
 
     def test_baixa_vai_para_supressoes(self):
-        r = rd.candidatos_do_diff([_evento("BAIXA", cnpj="99999999000199")])
+        cnpj = _cnpj("99999999", "0001")
+        r = rd.candidatos_do_diff([_evento("BAIXA", cnpj=cnpj)])
         self.assertEqual(r["candidatos"], [])
-        self.assertEqual(r["supressoes"], ["99999999000199"])
+        self.assertEqual(r["supressoes"], [cnpj])
+
+    def test_cnpj_invalido_e_descartado(self):
+        self.assertEqual(
+            rd.candidatos_do_diff([_evento("NOVA_FILIAL", cnpj="11111111000199")])["candidatos"], []
+        )
 
     def test_reativacao_e_mudanca_endereco_geram_payload_certo(self):
         rea = rd.candidatos_do_diff([_evento("REATIVACAO", situacao_antes="INAPTA")])["candidatos"][0]
