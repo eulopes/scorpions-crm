@@ -25,6 +25,7 @@ ARQUIVOS_DE_TESTE = [
     "tests.test_receita_snapshot",
     "tests.test_receita_dump",
     "tests.test_receita_ingest",
+    "tests.test_obras_dump",
 ]
 
 
