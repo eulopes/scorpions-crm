@@ -10,6 +10,7 @@ import os
 import tempfile
 import unittest
 import zipfile
+from datetime import date, timedelta
 from pathlib import Path
 
 _TMP = Path(tempfile.gettempdir()) / "scorpions_test_receita_dump.duckdb"
@@ -226,6 +227,60 @@ class DiffTest(unittest.TestCase):
         self.assertEqual([e["nome_fantasia"] for e in so_mun], ["RJ"])
         so_tipo = self._diff(tipos=("REATIVACAO",))
         self.assertEqual(so_tipo, [])
+
+
+def _evento(tipo: str, **over) -> dict:
+    base = {
+        "tipo": tipo, "cnpj": "11111111000101", "cnpj_basico": "11111111",
+        "matriz_filial": "2", "nome_fantasia": "CD SOROCABA", "situacao": "ATIVA",
+        "uf": "SP", "municipio_codigo": "7145", "municipio_nome": "SOROCABA",
+        "cnae_principal": "5211701", "cnae_descricao": "Armazéns gerais - emissão de warrant",
+        "data_inicio_atividade": date.today() - timedelta(days=40),
+        "logradouro": "ROD RAPOSO TAVARES", "numero": "KM 90", "bairro": "IPORANGA",
+        "cep": "18087-000", "email": "log@exemplo.com", "telefone": "1533000000",
+        "situacao_antes": None, "logradouro_antes": None, "municipio_antes": None,
+    }
+    base.update(over)
+    return base
+
+
+class MatcherTest(unittest.TestCase):
+    def test_nova_filial_logistica_vira_candidato_classificado(self):
+        r = rd.candidatos_do_diff([_evento("NOVA_FILIAL")])
+        self.assertEqual(len(r["candidatos"]), 1)
+        c = r["candidatos"][0]
+        self.assertEqual(c["evento_tipo"], "NOVA_FILIAL")
+        self.assertEqual(c["lead"]["segmento_icp"], "Galpões Logísticos & Indústrias")
+        self.assertTrue(c["lead"]["servicos_recomendados"])
+        self.assertEqual(c["lead"]["cidade"], "SOROCABA, SP")
+        self.assertEqual(c["lead"]["origem"], rd.FONTE_RECEITA_DUMP)
+        self.assertEqual(c["mudanca"]["type"], "nova_filial_receita")
+        self.assertEqual(c["mudanca"]["after"], "SOROCABA, SP")
+        self.assertEqual(c["mudanca"]["days_between"], 40)
+
+    def test_nao_classificado_e_omitido_por_padrao(self):
+        ev = _evento("NOVO_ESTABELECIMENTO", cnae_descricao="Atividades de organizações associativas",
+                     nome_fantasia="ASSOCIACAO XPTO", matriz_filial="1")
+        self.assertEqual(rd.candidatos_do_diff([ev])["candidatos"], [])
+        incluido = rd.candidatos_do_diff([ev], incluir_nao_classificado=True)["candidatos"]
+        self.assertEqual(len(incluido), 1)
+        self.assertEqual(incluido[0]["lead"]["segmento_icp"], "Não classificado")
+
+    def test_baixa_vai_para_supressoes(self):
+        r = rd.candidatos_do_diff([_evento("BAIXA", cnpj="99999999000199")])
+        self.assertEqual(r["candidatos"], [])
+        self.assertEqual(r["supressoes"], ["99999999000199"])
+
+    def test_reativacao_e_mudanca_endereco_geram_payload_certo(self):
+        rea = rd.candidatos_do_diff([_evento("REATIVACAO", situacao_antes="INAPTA")])["candidatos"][0]
+        self.assertEqual(rea["mudanca"]["type"], "situacao_cadastral_alterada")
+        self.assertTrue(rea["mudanca"]["reativacao"])
+        self.assertEqual(rea["mudanca"]["before"], "INAPTA")
+
+        end = rd.candidatos_do_diff([_evento("MUDANCA_ENDERECO", logradouro_antes="RUA VELHA")])["candidatos"][0]
+        self.assertEqual(end["mudanca"]["type"], "endereco_alterado")
+        self.assertEqual(end["mudanca"]["before"], "RUA VELHA")
+        self.assertIn("SOROCABA, SP", end["mudanca"]["after"])
 
 
 class _RespFalsa:

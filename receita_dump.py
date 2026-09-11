@@ -25,6 +25,8 @@ from typing import Any, Iterator
 import duckdb
 import requests
 
+from change_detection import FONTE_RECEITA_DUMP
+from crm_strategy import classificar_icp
 from niche_sources import _sessao_resiliente
 
 APP_DIR = Path(__file__).resolve().parent
@@ -289,9 +291,9 @@ TIPOS_EVENTO = (
 
 _CAMPOS_EVENTO = (
     "cnpj", "cnpj_basico", "matriz_filial", "nome_fantasia", "situacao",
-    "uf", "municipio_codigo", "cnae_principal", "data_inicio_atividade",
-    "logradouro", "numero", "bairro", "cep", "email", "telefone",
-    "situacao_antes", "logradouro_antes", "municipio_antes",
+    "uf", "municipio_codigo", "municipio_nome", "cnae_principal", "cnae_descricao",
+    "data_inicio_atividade", "logradouro", "numero", "bairro", "cep", "email",
+    "telefone", "situacao_antes", "logradouro_antes", "municipio_antes",
 )
 
 
@@ -324,13 +326,19 @@ def _classificar_evento_sql(comp_novo: str, comp_antigo: str) -> str:
                         ELSE NULL
                     END AS tipo,
                     n.cnpj, n.cnpj_basico, n.matriz_filial, n.nome_fantasia, n.situacao,
-                    n.uf, n.municipio_codigo, n.cnae_principal, n.data_inicio_atividade,
+                    n.uf, n.municipio_codigo,
+                    mun.nome AS municipio_nome,
+                    n.cnae_principal,
+                    cn.descricao AS cnae_descricao,
+                    n.data_inicio_atividade,
                     n.logradouro, n.numero, n.bairro, n.cep, n.email, n.telefone,
                     a.situacao AS situacao_antes,
                     a.logradouro AS logradouro_antes,
                     a.municipio_codigo AS municipio_antes
                 FROM n
                 FULL OUTER JOIN a ON a.cnpj = n.cnpj
+                LEFT JOIN municipios mun ON mun.codigo = n.municipio_codigo
+                LEFT JOIN cnaes cn ON cn.codigo = n.cnae_principal
              )
         SELECT * FROM classificado WHERE tipo IS NOT NULL
     """
@@ -390,3 +398,113 @@ def diff_competencias(
                 continue
         eventos.append(evento)
     return eventos
+
+
+# --- Matcher: evento do diff -> lead candidato + payload de sinal -------------
+
+_EVENTO_PARA_MUDANCA = {
+    "NOVA_FILIAL": "nova_filial_receita",
+    "NOVO_ESTABELECIMENTO": "novo_estabelecimento_receita",
+    "REATIVACAO": "situacao_cadastral_alterada",
+    "MUDANCA_ENDERECO": "endereco_alterado",
+}
+
+
+def _dias_desde(valor: date | None) -> int | None:
+    if not isinstance(valor, date):
+        return None
+    return max(0, (date.today() - valor).days)
+
+
+def _local_evento(evento: dict[str, Any]) -> str:
+    municipio = str(evento.get("municipio_nome") or evento.get("municipio_codigo") or "").strip()
+    uf = str(evento.get("uf") or "").strip().upper()
+    if municipio and uf:
+        return f"{municipio}, {uf}"
+    return municipio or uf
+
+
+def _endereco_evento(evento: dict[str, Any]) -> str:
+    principal = " ".join(
+        parte for parte in (str(evento.get("logradouro") or ""), str(evento.get("numero") or "")) if parte
+    ).strip()
+    partes = [principal, str(evento.get("bairro") or "").strip(), _local_evento(evento)]
+    cep = re.sub(r"\D", "", str(evento.get("cep") or ""))
+    if len(cep) == 8:
+        partes.append(f"CEP {cep[:5]}-{cep[5:]}")
+    return " - ".join(parte for parte in partes if parte)
+
+
+def candidatos_do_diff(
+    eventos: list[dict[str, Any]], *, incluir_nao_classificado: bool = False
+) -> dict[str, list]:
+    """Traduz eventos do diff em leads candidatos (já classificados por ICP) +
+    o payload de mudança que ``sales_signals.registrar_signal`` consome.
+
+    ``BAIXA`` não vira candidato -- entra em ``supressoes`` para o injetor
+    desativar sinais / marcar o lead existente. Função pura: só depende dos
+    dicts de evento (já enriquecidos com município/CNAE pelo diff).
+    """
+    candidatos: list[dict[str, Any]] = []
+    supressoes: list[str] = []
+
+    for evento in eventos:
+        tipo = evento["tipo"]
+        if tipo == "BAIXA":
+            supressoes.append(evento["cnpj"])
+            continue
+
+        nicho = str(evento.get("cnae_descricao") or evento.get("cnae_principal") or "").strip()
+        nome = str(evento.get("nome_fantasia") or "").strip() or f"CNPJ {evento['cnpj']}"
+        lead = {
+            "place_id": f"receita:{evento['cnpj']}",
+            "cnpj": evento["cnpj"],
+            "nome_empresa": nome,
+            "razao_social": "",
+            "decisor": "",
+            "nicho": nicho,
+            "cnae_fiscal_descricao": str(evento.get("cnae_descricao") or ""),
+            "endereco": _endereco_evento(evento),
+            "cidade": _local_evento(evento),
+            "telefone": str(evento.get("telefone") or ""),
+            "site": "",
+            "email": str(evento.get("email") or ""),
+            "status": "Novos Leads",
+            "status_receita": str(evento.get("situacao") or ""),
+            "origem": FONTE_RECEITA_DUMP,
+            "observacoes": (
+                f"Detectado pelo dump da Receita ({tipo}). "
+                "Confirme os dados antes do contato comercial."
+            ),
+        }
+        segmento, servicos = classificar_icp(lead)
+        lead["segmento_icp"] = segmento
+        lead["servicos_recomendados"] = "; ".join(servicos)
+        if segmento == "Não classificado" and not incluir_nao_classificado:
+            continue
+
+        mtipo = _EVENTO_PARA_MUDANCA[tipo]
+        if tipo in ("NOVA_FILIAL", "NOVO_ESTABELECIMENTO"):
+            mudanca = {
+                "type": mtipo, "field": "cnpj", "before": None,
+                "after": _local_evento(evento),
+                "days_between": _dias_desde(evento.get("data_inicio_atividade")),
+                "source": FONTE_RECEITA_DUMP,
+            }
+        elif tipo == "REATIVACAO":
+            mudanca = {
+                "type": mtipo, "field": "situacao_cadastral",
+                "before": evento.get("situacao_antes"), "after": evento.get("situacao"),
+                "days_between": None, "reativacao": True, "inativacao": False,
+                "source": FONTE_RECEITA_DUMP,
+            }
+        else:  # MUDANCA_ENDERECO
+            mudanca = {
+                "type": mtipo, "field": "address",
+                "before": evento.get("logradouro_antes"),
+                "after": _endereco_evento(evento),
+                "days_between": None, "source": FONTE_RECEITA_DUMP,
+            }
+        candidatos.append({"evento_tipo": tipo, "lead": lead, "mudanca": mudanca})
+
+    return {"candidatos": candidatos, "supressoes": supressoes}

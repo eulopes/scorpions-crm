@@ -241,6 +241,21 @@ class SalesSignalsTest(unittest.TestCase):
         self.assertEqual(sinais[0]["signal_type"], sales_signals.REGISTRY_STATUS_CHANGE)
         self.assertLessEqual(sinais[0]["signal_strength"], 20)
 
+    def test_nova_filial_do_dump_gera_sinal_new_branch_forte(self):
+        mudanca = {
+            "type": "nova_filial_receita", "field": "cnpj", "before": None,
+            "after": "Sorocaba, SP", "days_between": 40,
+            "source": sales_signals.FONTE_RECEITA_DUMP,
+        }
+        ids = derive_signals_from_changes(self.lead_id, [mudanca], fonte="Receita / Dados Abertos")
+        self.assertEqual(len(ids), 1)
+        sinal = sales_signals.listar_signals_ativos(self.lead_id)[0]
+        self.assertEqual(sinal["signal_type"], sales_signals.NEW_BRANCH)
+        self.assertGreaterEqual(sinal["signal_strength"], 85)
+        self.assertGreaterEqual(sinal["confidence"], 85)
+        # meia-vida longa: aos 60 dias ainda pesa mais da metade
+        self.assertGreater(calculate_signal_decay(sales_signals.NEW_BRANCH, 60), 0.5)
+
 
 class OpportunityEngineTest(unittest.TestCase):
     def test_fit_score_maximo_e_minimo(self):

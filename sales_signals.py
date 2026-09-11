@@ -14,7 +14,7 @@ import sqlite3
 from datetime import timedelta
 from typing import Any
 
-from change_detection import FONTE_RECEITA
+from change_detection import FONTE_RECEITA, FONTE_RECEITA_DUMP
 from company_history import agora_utc, conectar, iso_utc
 
 NEW_BRANCH = "NEW_BRANCH"
@@ -44,7 +44,8 @@ SINAIS_FUTUROS_NAO_IMPLEMENTADOS = (
 )
 
 _MEIA_VIDA_DIAS = {
-    NEW_BRANCH: 45, MULTI_UNIT: 45, COMPANY_EXPANSION: 45,
+    # NEW_BRANCH vem do dump mensal -- quando chega já tem semanas; janela longa.
+    NEW_BRANCH: 120, MULTI_UNIT: 45, COMPANY_EXPANSION: 45,
     REVIEWS_GROWTH: 30, RATING_GROWTH: 30, DIGITAL_GROWTH: 30,
     ADDRESS_CHANGE: 60, NEW_WEBSITE: 30, WEBSITE_CHANGE: 20,
     NEW_PHONE: 20, BUSINESS_STATUS_CHANGE: 60, NEW_COMPANY: 30,
@@ -70,6 +71,9 @@ _MAPA_TIPO_MUDANCA_PARA_SINAL = {
     "cnae_secundario_novo": NEW_CNAE,
     "situacao_cadastral_alterada": REGISTRY_STATUS_CHANGE,
     "quadro_societario_alterado": OWNERSHIP_CHANGE,
+    # Dump mensal da Receita (Fase 1).
+    "nova_filial_receita": NEW_BRANCH,
+    "novo_estabelecimento_receita": NEW_BRANCH,
 }
 
 
@@ -156,6 +160,10 @@ def _forca_por_mudanca(mudanca: dict[str, Any]) -> int:
         return 30
     if tipo == "quadro_societario_alterado":
         return 45
+    if tipo == "nova_filial_receita":
+        return 90
+    if tipo == "novo_estabelecimento_receita":
+        return 80
     return 30
 
 
@@ -168,7 +176,7 @@ def _confianca_por_mudanca(mudanca: dict[str, Any], fonte: str) -> int:
     ):
         base = 80
     # Registro oficial da Receita é a evidência mais forte que temos hoje.
-    if fonte == FONTE_RECEITA:
+    if fonte in (FONTE_RECEITA, FONTE_RECEITA_DUMP):
         base = 88
     dias = mudanca.get("days_between")
     if dias is not None and dias <= 1:
@@ -249,6 +257,22 @@ def _titulo_e_descricao(mudanca: dict[str, Any]) -> tuple[str, str]:
         else:
             corpo = "Composição do quadro societário mudou desde a última coleta."
         return "Mudança no quadro societário", corpo
+    if tipo == "nova_filial_receita":
+        local = str(mudanca.get("after") or "").strip()
+        return (
+            "Nova filial aberta",
+            f"A Receita registrou um novo estabelecimento (filial) desta empresa"
+            + (f" em {local}" if local else "")
+            + ". Janela típica de obra e infraestrutura.",
+        )
+    if tipo == "novo_estabelecimento_receita":
+        local = str(mudanca.get("after") or "").strip()
+        return (
+            "Empresa recém-aberta",
+            f"CNPJ recém-registrado na Receita"
+            + (f" em {local}" if local else "")
+            + ". Estrutura sendo montada agora.",
+        )
     return "Mudança detectada", f"Campo {mudanca['field']} mudou de {mudanca['before']} para {mudanca['after']}."
 
 

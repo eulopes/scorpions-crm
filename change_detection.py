@@ -15,6 +15,8 @@ from typing import Any
 # Fonte das mudanças firmográficas -- usada por sales_signals para calibrar a
 # confiança (registro oficial da Receita é a evidência mais forte que temos).
 FONTE_RECEITA = "Receita Federal (BrasilAPI)"
+# Dump mensal de Dados Abertos (Fase 1) -- mesma autoridade, cadência mensal.
+FONTE_RECEITA_DUMP = "Receita Federal (Dados Abertos)"
 
 TIPOS_MUDANCA = (
     "empresa_adicionada",
