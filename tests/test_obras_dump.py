@@ -101,6 +101,12 @@ class StoreTest(unittest.TestCase):
             n = od.carregar_alvaras(con, "sao-paulo", "2026-08", [_alvara(id_alvara="")])
         self.assertEqual(n, 0)
 
+    def test_proprietario_sobrevive_ao_armazenamento(self):
+        with od.conectar() as con:
+            od.carregar_alvaras(con, "sao-paulo", "2026-08", [_alvara(proprietario="ASPECT MIDIA LTDA")])
+            relevantes = od.alvaras_relevantes(con, "sao-paulo", "2026-08")
+        self.assertEqual(relevantes[0]["proprietario"], "ASPECT MIDIA LTDA")
+
     def test_relevantes_filtra_area_uso_e_tipo(self):
         registros = [
             _alvara(id_alvara="GRANDE-COM", uso="comercial", tipo="execucao", area_construida=2000),

@@ -35,6 +35,11 @@ CAMPOS_ALVARA = (
     "id_alvara", "cidade", "data_emissao", "tipo", "uso", "area_construida",
     "endereco", "numero", "bairro", "municipio_nome", "uf", "cep",
     "sql_iptu", "subprefeitura", "lat", "lng",
+    # Nome de quem pediu o alvará -- quando a fonte traz (SISSEL/SP traz),
+    # é o casamento mais forte que temos (obras_match tenta por nome antes
+    # de endereço). Precisa sobreviver ao armazenamento para o matcher usar
+    # depois de reler de alvaras_relevantes().
+    "proprietario",
 )
 
 _RE_COMPETENCIA = re.compile(r"^\d{4}-\d{2}$")
@@ -136,11 +141,17 @@ def migrar_esquema(conexao: duckdb.DuckDBPyConnection) -> None:
             subprefeitura TEXT,
             lat DOUBLE,
             lng DOUBLE,
+            proprietario TEXT,
             chave_endereco TEXT,
             PRIMARY KEY (cidade, id_alvara, competencia)
         )
         """
     )
+    colunas_existentes = {
+        linha[1] for linha in conexao.execute("PRAGMA table_info(alvaras)").fetchall()
+    }
+    if "proprietario" not in colunas_existentes:
+        conexao.execute("ALTER TABLE alvaras ADD COLUMN proprietario TEXT")
     conexao.execute(
         "CREATE INDEX IF NOT EXISTS idx_alvaras_chave ON alvaras(chave_endereco)"
     )
@@ -172,7 +183,10 @@ def _canonizar(registro: dict[str, Any], competencia: str) -> dict[str, Any]:
     if saida["uso"] not in USOS:
         saida["uso"] = "outro"
     saida["area_construida"] = _para_float(saida.get("area_construida"))
-    for campo in ("endereco", "numero", "bairro", "municipio_nome", "uf", "sql_iptu", "subprefeitura"):
+    for campo in (
+        "endereco", "numero", "bairro", "municipio_nome", "uf", "sql_iptu",
+        "subprefeitura", "proprietario",
+    ):
         valor = saida.get(campo)
         saida[campo] = str(valor).strip() if valor not in (None, "") else None
     cep = re.sub(r"\D", "", str(saida.get("cep") or ""))
