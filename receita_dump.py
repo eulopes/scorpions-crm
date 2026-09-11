@@ -18,6 +18,7 @@ import re
 import tempfile
 import zipfile
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -274,3 +275,118 @@ def carregar_referencia(
         _carregar(arquivo.as_posix())
     _ = coluna_valor  # documenta o mapeamento; a query usa alias fixo 'valor'
     return int(conexao.execute(f"SELECT count(*) FROM {tabela}").fetchone()[0])
+
+
+# --- Diff mês-a-mês -----------------------------------------------------------
+
+TIPOS_EVENTO = (
+    "NOVA_FILIAL",           # CNPJ novo, é filial de empresa que já existia
+    "NOVO_ESTABELECIMENTO",  # CNPJ novo, é matriz (empresa nova)
+    "REATIVACAO",            # situação voltou a ATIVA
+    "MUDANCA_ENDERECO",      # endereço mudou, ambas ATIVA
+    "BAIXA",                 # ATIVA -> BAIXADA/INAPTA/SUSPENSA (para suprimir lead)
+)
+
+_CAMPOS_EVENTO = (
+    "cnpj", "cnpj_basico", "matriz_filial", "nome_fantasia", "situacao",
+    "uf", "municipio_codigo", "cnae_principal", "data_inicio_atividade",
+    "logradouro", "numero", "bairro", "cep", "email", "telefone",
+    "situacao_antes", "logradouro_antes", "municipio_antes",
+)
+
+
+def _primeiro_dia(competencia: str) -> date:
+    comp = _validar_competencia(competencia)
+    return date(int(comp[:4]), int(comp[5:7]), 1)
+
+
+def _classificar_evento_sql(comp_novo: str, comp_antigo: str) -> str:
+    return f"""
+        WITH n AS (SELECT * FROM estabelecimentos WHERE competencia = '{comp_novo}'),
+             a AS (SELECT * FROM estabelecimentos WHERE competencia = '{comp_antigo}'),
+             classificado AS (
+                SELECT
+                    CASE
+                        WHEN a.cnpj IS NULL AND n.situacao = 'ATIVA' AND n.matriz_filial = '2'
+                            THEN 'NOVA_FILIAL'
+                        WHEN a.cnpj IS NULL AND n.situacao = 'ATIVA'
+                            THEN 'NOVO_ESTABELECIMENTO'
+                        WHEN a.cnpj IS NOT NULL AND a.situacao <> 'ATIVA' AND n.situacao = 'ATIVA'
+                            THEN 'REATIVACAO'
+                        WHEN a.cnpj IS NOT NULL AND a.situacao = 'ATIVA' AND n.situacao <> 'ATIVA'
+                            THEN 'BAIXA'
+                        WHEN a.cnpj IS NOT NULL AND a.situacao = 'ATIVA' AND n.situacao = 'ATIVA' AND (
+                                coalesce(a.logradouro, '') <> coalesce(n.logradouro, '')
+                                OR coalesce(a.numero, '') <> coalesce(n.numero, '')
+                                OR coalesce(a.municipio_codigo, '') <> coalesce(n.municipio_codigo, '')
+                            )
+                            THEN 'MUDANCA_ENDERECO'
+                        ELSE NULL
+                    END AS tipo,
+                    n.cnpj, n.cnpj_basico, n.matriz_filial, n.nome_fantasia, n.situacao,
+                    n.uf, n.municipio_codigo, n.cnae_principal, n.data_inicio_atividade,
+                    n.logradouro, n.numero, n.bairro, n.cep, n.email, n.telefone,
+                    a.situacao AS situacao_antes,
+                    a.logradouro AS logradouro_antes,
+                    a.municipio_codigo AS municipio_antes
+                FROM n
+                FULL OUTER JOIN a ON a.cnpj = n.cnpj
+             )
+        SELECT * FROM classificado WHERE tipo IS NOT NULL
+    """
+
+
+def diff_competencias(
+    conexao: duckdb.DuckDBPyConnection,
+    comp_novo: str,
+    comp_antigo: str,
+    *,
+    tipos: tuple[str, ...] | None = None,
+    ufs: tuple[str, ...] | None = None,
+    municipios: tuple[str, ...] | None = None,
+    ignorar_abertura_anterior_a: str | date | None = "auto",
+) -> list[dict[str, Any]]:
+    """Compara duas competências já carregadas e devolve os eventos de trigger.
+
+    ``ignorar_abertura_anterior_a`` descarta NOVA_FILIAL/NOVO_ESTABELECIMENTO
+    cuja data de início de atividade seja anterior ao limite -- se o CNPJ
+    "aparece" mas abriu anos atrás, é lacuna de cobertura do dump antigo, não
+    uma abertura real. ``"auto"`` usa o 1º dia da competência antiga.
+    """
+    comp_novo = _validar_competencia(comp_novo)
+    comp_antigo = _validar_competencia(comp_antigo)
+    carregadas = set(competencias_carregadas(conexao))
+    faltando = {comp_novo, comp_antigo} - carregadas
+    if faltando:
+        raise ValueError(f"Competência(s) não carregada(s): {', '.join(sorted(faltando))}.")
+
+    if ignorar_abertura_anterior_a == "auto":
+        limite_abertura: date | None = _primeiro_dia(comp_antigo)
+    elif isinstance(ignorar_abertura_anterior_a, str):
+        limite_abertura = date.fromisoformat(ignorar_abertura_anterior_a)
+    else:
+        limite_abertura = ignorar_abertura_anterior_a
+
+    filtro_tipos = set(tipos or TIPOS_EVENTO)
+    filtro_ufs = {u.upper() for u in ufs} if ufs else None
+    filtro_mun = set(municipios) if municipios else None
+
+    colunas = ["tipo", *_CAMPOS_EVENTO]
+    eventos: list[dict[str, Any]] = []
+    for linha in conexao.execute(_classificar_evento_sql(comp_novo, comp_antigo)).fetchall():
+        evento = dict(zip(colunas, linha))
+        if evento["tipo"] not in filtro_tipos:
+            continue
+        if filtro_ufs is not None and str(evento.get("uf") or "").upper() not in filtro_ufs:
+            continue
+        if filtro_mun is not None and str(evento.get("municipio_codigo") or "") not in filtro_mun:
+            continue
+        if (
+            evento["tipo"] in ("NOVA_FILIAL", "NOVO_ESTABELECIMENTO")
+            and limite_abertura is not None
+        ):
+            abertura = evento.get("data_inicio_atividade")
+            if abertura is not None and abertura < limite_abertura:
+                continue
+        eventos.append(evento)
+    return eventos

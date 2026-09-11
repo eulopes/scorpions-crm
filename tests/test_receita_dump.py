@@ -37,6 +37,11 @@ def _linha_estab(**over: str) -> str:
     return ";".join(f'"{base[c]}"' for c in _COLS)
 
 
+def _defaults(**over: str) -> dict[str, str]:
+    """Overrides para _linha_estab -- os defaults já vivem lá."""
+    return dict(over)
+
+
 def _zip_estab(linhas: list[str], nome_membro: str = "K3241.ESTABELE") -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -131,6 +136,96 @@ class CargaTest(unittest.TestCase):
                 nome = con.execute("SELECT nome FROM municipios WHERE codigo='6001'").fetchone()[0]
         self.assertEqual(n, 2)
         self.assertEqual(nome, "RIO DE JANEIRO")
+
+
+def _carregar_competencia(comp: str, linhas_over: list[dict]) -> None:
+    dados = _zip_estab([_linha_estab(**over) for over in linhas_over])
+    with tempfile.TemporaryDirectory() as tmp:
+        caminho = Path(tmp) / "Estabelecimentos0.zip"
+        caminho.write_bytes(dados)
+        with rd.conectar() as con:
+            rd.migrar_esquema(con)
+            rd.carregar_estabelecimentos(con, comp, [caminho])
+
+
+class DiffTest(unittest.TestCase):
+    def setUp(self):
+        with rd.conectar() as con:
+            for t in ("estabelecimentos", "competencias_carregadas", "municipios", "cnaes"):
+                con.execute(f"DROP TABLE IF EXISTS {t}")
+            rd.migrar_esquema(con)
+
+    def _diff(self, **kw):
+        with rd.conectar() as con:
+            return rd.diff_competencias(con, "2026-08", "2026-07", **kw)
+
+    def test_competencia_nao_carregada_levanta(self):
+        _carregar_competencia("2026-08", [_defaults()])
+        with self.assertRaises(ValueError):
+            self._diff()
+
+    def test_nova_filial_e_novo_estabelecimento(self):
+        antiga = [_defaults(cnpj_basico="10000001", matriz_filial="1"),
+                  _defaults(cnpj_basico="10000001", cnpj_ordem="2", matriz_filial="2")]
+        nova = antiga + [
+            _defaults(cnpj_basico="10000001", cnpj_ordem="3", matriz_filial="2",
+                      data_inicio_atividade="20260805", nome_fantasia="FILIAL NOVA"),
+            _defaults(cnpj_basico="20000002", matriz_filial="1",
+                      data_inicio_atividade="20260810", nome_fantasia="EMPRESA NOVA"),
+        ]
+        _carregar_competencia("2026-07", antiga)
+        _carregar_competencia("2026-08", nova)
+        eventos = {e["nome_fantasia"]: e["tipo"] for e in self._diff()}
+        self.assertEqual(eventos["FILIAL NOVA"], "NOVA_FILIAL")
+        self.assertEqual(eventos["EMPRESA NOVA"], "NOVO_ESTABELECIMENTO")
+
+    def test_reativacao_e_baixa(self):
+        _carregar_competencia("2026-07", [
+            _defaults(cnpj_basico="30000003", situacao_cadastral="08"),   # BAIXADA
+            _defaults(cnpj_basico="40000004", situacao_cadastral="02"),   # ATIVA
+        ])
+        _carregar_competencia("2026-08", [
+            _defaults(cnpj_basico="30000003", situacao_cadastral="02"),   # -> ATIVA
+            _defaults(cnpj_basico="40000004", situacao_cadastral="08"),   # -> BAIXADA
+        ])
+        por_cnpj = {e["cnpj_basico"]: e["tipo"] for e in self._diff()}
+        self.assertEqual(por_cnpj["30000003"], "REATIVACAO")
+        self.assertEqual(por_cnpj["40000004"], "BAIXA")
+
+    def test_mudanca_de_endereco(self):
+        _carregar_competencia("2026-07", [_defaults(cnpj_basico="50000005", logradouro="RUA A", numero="10")])
+        _carregar_competencia("2026-08", [_defaults(cnpj_basico="50000005", logradouro="RUA B", numero="99")])
+        eventos = self._diff()
+        self.assertEqual(len(eventos), 1)
+        self.assertEqual(eventos[0]["tipo"], "MUDANCA_ENDERECO")
+        self.assertIn("RUA A", eventos[0]["logradouro_antes"])
+
+    def test_abertura_antiga_e_descartada_por_padrao(self):
+        _carregar_competencia("2026-07", [_defaults(cnpj_basico="60000006")])
+        _carregar_competencia("2026-08", [
+            _defaults(cnpj_basico="60000006"),
+            _defaults(cnpj_basico="70000007", data_inicio_atividade="20180101",
+                      nome_fantasia="CNPJ ANTIGO QUE APARECEU"),
+        ])
+        self.assertEqual(self._diff(), [])
+        incluindo = self._diff(ignorar_abertura_anterior_a=None)
+        self.assertEqual([e["nome_fantasia"] for e in incluindo], ["CNPJ ANTIGO QUE APARECEU"])
+
+    def test_filtro_por_uf_e_municipio(self):
+        _carregar_competencia("2026-07", [_defaults(cnpj_basico="80000008")])
+        _carregar_competencia("2026-08", [
+            _defaults(cnpj_basico="80000008"),
+            _defaults(cnpj_basico="90000009", uf="SP", municipio="7107",
+                      data_inicio_atividade="20260801", nome_fantasia="SP"),
+            _defaults(cnpj_basico="91000009", uf="RJ", municipio="6001",
+                      data_inicio_atividade="20260801", nome_fantasia="RJ"),
+        ])
+        so_sp = self._diff(ufs=("SP",))
+        self.assertEqual([e["nome_fantasia"] for e in so_sp], ["SP"])
+        so_mun = self._diff(municipios=("6001",))
+        self.assertEqual([e["nome_fantasia"] for e in so_mun], ["RJ"])
+        so_tipo = self._diff(tipos=("REATIVACAO",))
+        self.assertEqual(so_tipo, [])
 
 
 class _RespFalsa:
