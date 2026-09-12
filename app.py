@@ -1306,18 +1306,27 @@ def listar_leads(
         )
         parametros.append(equipe_id)
     if busca:
-        sql += " AND (nome_empresa LIKE ? OR razao_social LIKE ? OR cnpj LIKE ? OR cidade LIKE ? OR endereco LIKE ?)"
+        sql += (
+            " AND (leads.nome_empresa LIKE ? OR leads.razao_social LIKE ? OR leads.cnpj LIKE ? "
+            "OR leads.cidade LIKE ? OR leads.endereco LIKE ?)"
+        )
         termo = f"%{busca}%"
         digitos_busca = limpar_cnpj(busca)
         termo_cnpj = f"%{digitos_busca}%" if digitos_busca else termo
         parametros.extend([termo, termo, termo_cnpj, termo, termo])
     if nicho != "Todos":
-        sql += " AND nicho = ?"
+        sql += " AND leads.nicho = ?"
         parametros.append(nicho)
     if status != "Todos":
-        sql += " AND status = ?"
+        # Qualificado com "leads." -- usuarios TAMBÉM tem uma coluna "status"
+        # (ativo/inativo do usuário), e o LEFT JOIN torna "status" sozinho
+        # ambíguo pro SQLite, que recusa a query inteira em vez de adivinhar
+        # (ambiguous column name: status). Bug real encontrado em QA: toda
+        # tentativa de filtrar Clientes/Empresas por etapa do funil quebrava
+        # a tela inteira com o traceback do Python.
+        sql += " AND leads.status = ?"
         parametros.append(status)
-    sql += " ORDER BY atualizado_em DESC"
+    sql += " ORDER BY leads.atualizado_em DESC"
     with conectar() as conexao:
         return pd.read_sql_query(sql, conexao, params=parametros)
 
@@ -3057,12 +3066,31 @@ if aba_base:
         value=st.session_state.get("busca_empresas", ""),
         key=f"busca_empresas_{_versao_busca_empresas}",
     )
+    # Sincroniza de volta -- sem isso, "busca_empresas" só é escrito por quem
+    # pré-preenche de fora (botão "Abrir" do Pipeline, busca global da
+    # sidebar). Se o usuário editar o campo diretamente aqui e depois trocar
+    # de página e voltar (o widget "renasce" com essa mesma versão), o
+    # `value=` acima ainda aponta pro prefill antigo -- o campo voltava para
+    # o valor do "Abrir" em vez de continuar com o que o usuário digitou por
+    # último. Bug real encontrado em QA.
+    st.session_state["busca_empresas"] = termo
     filtro_nicho = f2.selectbox("Filtrar nicho", nichos, key="filtro_nicho_empresas")
     filtro_status = f3.selectbox("Filtrar status", ["Todos"] + STATUS, key="filtro_status_empresas")
     filtro_responsavel = f4.selectbox(
         "Filtrar responsável", responsaveis, key="filtro_responsavel_empresas"
     )
-    base = leads_visiveis(termo, filtro_nicho, filtro_status)
+    try:
+        base = leads_visiveis(termo, filtro_nicho, filtro_status)
+    except Exception as erro:
+        # Segunda camada de defesa (a causa raiz do bug de QA -- "status"
+        # ambíguo no JOIN com "usuarios" -- já foi corrigida em listar_leads,
+        # mas um erro de consulta aqui não deve mais derrubar a tela inteira
+        # com o traceback cru do Python exposto ao usuário final).
+        st.error(
+            "Não foi possível aplicar esses filtros agora. Tente novamente ou avise o time "
+            f"técnico com este detalhe: {erro}"
+        )
+        st.stop()
     if filtro_responsavel == "Sem responsável":
         base = base[base["responsavel_nome"].isna()].copy()
     elif filtro_responsavel != "Todos":

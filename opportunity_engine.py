@@ -175,9 +175,28 @@ def calculate_data_confidence(lead: dict[str, Any], snapshots: list[dict[str, An
     return min(100, pontos)
 
 
+def _sinais_com_peso_comercial(sinais_ativos: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Filtra fora sinais puramente administrativos (hoje, só NEW_COMPANY --
+    "Empresa adicionada à base", gerado automaticamente pelo worker de
+    inteligência ao criar o 1º snapshot de qualquer lead novo) do cálculo de
+    Intent/Timing/Why-now.
+
+    NEW_COMPANY não representa nenhuma intenção ou momento de compra -- é só
+    o registro de que passamos a monitorar a empresa. Sem esse filtro, ele
+    dilui a força média de praticamente todo lead trazido por uma fonte
+    automatizada (Receita/Obras/CNES): o lead sempre chega com um
+    NEW_COMPANY "de brinde" (força 35) ao lado do sinal de negócio real
+    (força 80-90), empurrando a média para a faixa "moderada" mesmo quando o
+    sinal de negócio sozinho seria "alto". Encontrado em QA: o texto "Why
+    now" do Radar saía idêntico ("...sinal moderado...") em toda empresa
+    recém-criada, independente do sinal de origem."""
+    return [s for s in sinais_ativos if s.get("signal_type") != _sinais.NEW_COMPANY]
+
+
 def calculate_intent_score(sinais_ativos: list[dict[str, Any]]) -> int:
     """'Existem sinais observáveis de necessidade ou mudança comercial?' --
     baseado só em Sales Signals reais, nunca em posse de telefone/site/CNPJ."""
+    sinais_ativos = _sinais_com_peso_comercial(sinais_ativos)
     if not sinais_ativos:
         return 0
     soma_ponderada = 0.0
@@ -197,6 +216,7 @@ def calculate_intent_score(sinais_ativos: list[dict[str, Any]]) -> int:
 def calculate_timing_score(sinais_ativos: list[dict[str, Any]]) -> int:
     """'Existe motivo para abordar esta empresa agora?' -- depende só de
     recência/combinação de sinais; Fit alto sozinho não gera Timing alto."""
+    sinais_ativos = _sinais_com_peso_comercial(sinais_ativos)
     if not sinais_ativos:
         return 0
     decaimentos = [
@@ -230,7 +250,15 @@ def generate_why_company(lead: dict[str, Any], fit: int) -> str:
 
 def generate_why_now(sinais_ativos: list[dict[str, Any]]) -> dict[str, Any]:
     """Separa FACT (o que foi observado), INFERENCE (o que isso pode indicar)
-    e RECOMMENDATION -- nunca apresenta inferência como se fosse fato."""
+    e RECOMMENDATION -- nunca apresenta inferência como se fosse fato.
+
+    Ignora sinais puramente administrativos (NEW_COMPANY) na análise -- eles
+    continuam visíveis na seção "Evidências" (build_evidence, sem filtro,
+    para transparência total), mas não participam da inferência de
+    urgência: "empresa entrou na base" não é um fato comercial, e deixá-lo
+    aqui sempre empurrava o texto para "sinal moderado" (ver
+    _sinais_com_peso_comercial)."""
+    sinais_ativos = _sinais_com_peso_comercial(sinais_ativos)
     if not sinais_ativos:
         return {
             "facts": [],

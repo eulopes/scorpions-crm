@@ -34,6 +34,7 @@ from opportunity_engine import (  # noqa: E402
     calculate_opportunity_score,
     calculate_timing_score,
     evaluate_opportunity,
+    generate_why_now,
     recommend_service,
     _nivel_por_pontuacao,
 )
@@ -292,6 +293,41 @@ class OpportunityEngineTest(unittest.TestCase):
         sinal_forte = {"signal_type": sales_signals.MULTI_UNIT, "signal_strength": 90, "confidence": 90, "detected_at": automation.iso_utc()}
         sinal_fraco = {"signal_type": sales_signals.NEW_PHONE, "signal_strength": 20, "confidence": 40, "detected_at": automation.iso_utc()}
         self.assertGreater(calculate_intent_score([sinal_forte]), calculate_intent_score([sinal_fraco]))
+
+    def test_new_company_nao_dilui_intent_timing_nem_why_now(self):
+        # Caso real de QA: todo lead novo trazido por Receita/Obras/CNES
+        # chega com um NEW_BRANCH (sinal de negócio, força 80) MAIS um
+        # NEW_COMPANY (bookkeeping do worker, força 35) -- sem o filtro, a
+        # média sempre caía perto de 57, empurrando Intent/Timing/Why-now
+        # para "moderado" mesmo quando o sinal de negócio sozinho é forte.
+        agora = automation.iso_utc()
+        so_negocio = [
+            {"signal_type": sales_signals.NEW_BRANCH, "signal_strength": 80, "confidence": 85,
+             "detected_at": agora, "description": "Nova filial aberta."}
+        ]
+        com_new_company = so_negocio + [
+            {"signal_type": sales_signals.NEW_COMPANY, "signal_strength": 35, "confidence": 70,
+             "detected_at": agora, "description": "Primeira coleta registrada."}
+        ]
+        self.assertEqual(calculate_intent_score(so_negocio), calculate_intent_score(com_new_company))
+        self.assertEqual(calculate_timing_score(so_negocio), calculate_timing_score(com_new_company))
+        self.assertEqual(
+            generate_why_now(so_negocio)["recommendation"],
+            generate_why_now(com_new_company)["recommendation"],
+        )
+        # E o texto deixa de ficar preso em "moderado": força 80 sozinho é "alta".
+        self.assertIn("próximos dias", generate_why_now(com_new_company)["recommendation"])
+
+    def test_new_company_sozinho_nao_gera_intent_timing_nem_why_now_falso(self):
+        so_new_company = [
+            {"signal_type": sales_signals.NEW_COMPANY, "signal_strength": 35, "confidence": 70,
+             "detected_at": automation.iso_utc(), "description": "Primeira coleta registrada."}
+        ]
+        self.assertEqual(calculate_intent_score(so_new_company), 0)
+        self.assertEqual(calculate_timing_score(so_new_company), 0)
+        why_now = generate_why_now(so_new_company)
+        self.assertEqual(why_now["facts"], [])
+        self.assertIn("Nenhum sinal comercial ativo", why_now["inference"])
 
     def test_opportunity_score_usa_pesos_documentados(self):
         esperado = round(0.30 * 100 + 0.30 * 0 + 0.25 * 0 + 0.15 * 0)
