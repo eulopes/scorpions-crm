@@ -18,6 +18,7 @@ from company_history import agora_utc, conectar, iso_utc, listar_snapshots
 from crm_strategy import PERFIS_ICP
 from niche_sources import normalizar_cnpj
 from sales_signals import calculate_signal_decay, listar_signals_ativos
+import sales_signals as _sinais
 
 # Pesos centralizados -- nunca hardcoded dentro da função de cálculo, pra
 # poder ajustar o comportamento do produto sem tocar em lógica.
@@ -288,6 +289,150 @@ def recommend_next_action(
     if timing_score < 20:
         return "Monitorar -- sem motivo objetivo para abordagem imediata."
     return "Baixa prioridade -- manter na base e reavaliar no próximo ciclo."
+
+
+_CATEGORIA_POR_SINAL = {
+    _sinais.OBRA_ATIVA: "expansao_fisica",
+    _sinais.NEW_BRANCH: "expansao_fisica",
+    _sinais.MULTI_UNIT: "expansao_fisica",
+    _sinais.ADDRESS_CHANGE: "expansao_fisica",
+    _sinais.COMPANY_EXPANSION: "expansao_fisica",
+    _sinais.CAPITAL_INCREASE: "investimento",
+    _sinais.CORE_ACTIVITY_CHANGE: "mudanca_atividade",
+    _sinais.NEW_CNAE: "mudanca_atividade",
+}
+
+# (categoria do gatilho, segmento ICP) -> (serviço específico, motivo em
+# linguagem de negócio). O serviço sempre vem da própria lista de
+# ``servicos_recomendados`` do segmento (crm_strategy.PERFIS_ICP) -- isto só
+# decide QUAL item da lista puxar pra frente e POR QUÊ, a partir do gatilho
+# que disparou agora. Nunca inventa um serviço fora do que o ICP já prevê.
+_SERVICO_POR_CATEGORIA_E_SEGMENTO: dict[tuple[str, str], tuple[str, str]] = {
+    ("expansao_fisica", "Galpões Logísticos & Indústrias"): (
+        "CFTV perimetral e cabeamento estruturado",
+        "obra ou nova unidade detectada -- ainda não tem nenhuma infraestrutura de "
+        "segurança ou rede instalada. Janela ideal pra orçar antes do acabamento.",
+    ),
+    ("expansao_fisica", "Escritórios Corporativos & Serviços"): (
+        "Organização de racks e servidores",
+        "nova filial ou endereço detectado -- unidade nova normalmente começa sem "
+        "infraestrutura de TI pronta.",
+    ),
+    ("expansao_fisica", "Clínicas, Hospitais & Laboratórios"): (
+        "CFTV em áreas comuns e recepção",
+        "nova unidade de atendimento detectada -- precisa de segurança na recepção "
+        "desde o primeiro dia de funcionamento.",
+    ),
+    ("expansao_fisica", "Comércios & Redes de Varejo"): (
+        "Infraestrutura elétrica e de TI",
+        "nova loja/unidade detectada -- costuma abrir rápido e sem planejamento "
+        "prévio de rede e elétrica.",
+    ),
+    ("investimento", "Galpões Logísticos & Indústrias"): (
+        "Wi-Fi industrial e controle de acesso",
+        "aumento de capital social -- indica investimento na operação, bom momento "
+        "pra propor upgrade de conectividade e controle de acesso.",
+    ),
+    ("investimento", "Escritórios Corporativos & Serviços"): (
+        "Firewall e segurança de dados",
+        "aumento de capital social -- empresa em crescimento tende a lidar com mais "
+        "dados sensíveis, reforçar segurança é natural agora.",
+    ),
+    ("investimento", "Clínicas, Hospitais & Laboratórios"): (
+        "Redundância de rede",
+        "aumento de capital social -- sugere expansão de atendimento; rede não pode "
+        "cair numa unidade de saúde.",
+    ),
+    ("investimento", "Comércios & Redes de Varejo"): (
+        "Estabilidade de rede para PDVs e caixas",
+        "aumento de capital social -- crescimento financeiro costuma vir acompanhado "
+        "de mais pontos de venda.",
+    ),
+    ("reativacao", "Galpões Logísticos & Indústrias"): (
+        "Obras técnicas e CFTV perimetral",
+        "empresa reativada na Receita -- infraestrutura de segurança pode estar "
+        "desligada ou desatualizada depois do período parado.",
+    ),
+    ("reativacao", "Escritórios Corporativos & Serviços"): (
+        "Contrato mensal de suporte de TI",
+        "empresa reativada na Receita -- reabertura é o momento certo pra colocar "
+        "suporte de TI recorrente em dia.",
+    ),
+    ("reativacao", "Clínicas, Hospitais & Laboratórios"): (
+        "Nobreaks",
+        "empresa reativada na Receita -- reabrir uma unidade de saúde exige garantir "
+        "energia contínua antes de voltar a atender.",
+    ),
+    ("reativacao", "Comércios & Redes de Varejo"): (
+        "CFTV contra perdas",
+        "empresa reativada na Receita -- reabertura de loja é ponto de atenção pra "
+        "perdas e furtos.",
+    ),
+    ("mudanca_atividade", "Galpões Logísticos & Indústrias"): (
+        "Cabeamento estruturado",
+        "mudança de CNAE/atividade -- operação nova ou diferente costuma exigir "
+        "infraestrutura de rede refeita.",
+    ),
+    ("mudanca_atividade", "Escritórios Corporativos & Serviços"): (
+        "Segurança de dados",
+        "mudança de CNAE/atividade -- ramo novo pode trazer exigência de "
+        "compliance ainda não coberta.",
+    ),
+    ("mudanca_atividade", "Clínicas, Hospitais & Laboratórios"): (
+        "Conformidade com LGPD",
+        "mudança de CNAE/atividade -- ramo novo em saúde costuma vir com dado "
+        "sensível de paciente, LGPD entra em pauta.",
+    ),
+    ("mudanca_atividade", "Comércios & Redes de Varejo"): (
+        "CFTV contra perdas",
+        "mudança de CNAE/atividade -- operação nova ainda não tem cobertura de "
+        "segurança avaliada.",
+    ),
+}
+
+
+def recommend_service(segmento_icp: str, sinais_ativos: list[dict[str, Any]]) -> dict[str, str] | None:
+    """'Dado o que aconteceu, qual serviço específico oferecer e por quê?'
+
+    Cruza o segmento ICP com a categoria do sinal mais recente -- nunca
+    inventa um serviço fora da lista já definida pra aquele segmento em
+    crm_strategy.PERFIS_ICP, só decide qual item puxar pra frente. Devolve
+    None quando não há segmento classificado, sinal ativo, ou quando o sinal
+    mais recente é uma baixa/inaptidão (não é hora de vender, é hora de
+    despriorizar)."""
+    perfil = PERFIS_ICP.get(segmento_icp)
+    if not perfil or not sinais_ativos:
+        return None
+
+    mais_recente = max(sinais_ativos, key=lambda s: s.get("detected_at") or "")
+    tipo_sinal = mais_recente.get("signal_type")
+    titulo_sinal = str(mais_recente.get("title") or "")
+
+    if tipo_sinal == _sinais.REGISTRY_STATUS_CHANGE:
+        if "Reativação" in titulo_sinal:
+            categoria = "reativacao"
+        else:
+            # Baixa/inaptidão ou mudança neutra: não é momento de oferecer
+            # serviço -- é sinal de despriorizar, não de vender.
+            return None
+    else:
+        categoria = _CATEGORIA_POR_SINAL.get(tipo_sinal)
+
+    servicos_do_segmento = perfil["servicos_recomendados"]
+    assert isinstance(servicos_do_segmento, tuple)
+
+    par = _SERVICO_POR_CATEGORIA_E_SEGMENTO.get((categoria, segmento_icp)) if categoria else None
+    if par:
+        servico, motivo = par
+        return {"servico": servico, "motivo": motivo.capitalize(), "sinal_base": tipo_sinal}
+
+    # Sinal sem categoria específica mapeada (ex.: crescimento de avaliações,
+    # site novo): recomendação genérica com o primeiro item da lista do ICP.
+    return {
+        "servico": servicos_do_segmento[0] if servicos_do_segmento else "",
+        "motivo": "Sinal comercial recente detectado -- avalie o pacote padrão do segmento.",
+        "sinal_base": tipo_sinal,
+    }
 
 
 def _pontuacao_anterior(lead_id: int) -> dict[str, Any] | None:

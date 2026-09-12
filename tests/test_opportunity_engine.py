@@ -34,6 +34,7 @@ from opportunity_engine import (  # noqa: E402
     calculate_opportunity_score,
     calculate_timing_score,
     evaluate_opportunity,
+    recommend_service,
     _nivel_por_pontuacao,
 )
 from sales_signals import calculate_signal_decay, derive_signals_from_changes, registrar_signal
@@ -322,6 +323,61 @@ class OpportunityEngineTest(unittest.TestCase):
         with automation.conectar() as conexao:
             linha = conexao.execute("SELECT opportunity_score FROM leads WHERE id = ?", (lead_id,)).fetchone()
         self.assertEqual(linha["opportunity_score"], segundo["opportunity_score"])
+
+
+def _sinal(tipo, titulo="", detected_at="2026-01-01T00:00:00+00:00"):
+    return {"signal_type": tipo, "title": titulo, "detected_at": detected_at}
+
+
+class RecommendServiceTest(unittest.TestCase):
+    def test_expansao_fisica_recomenda_servico_certo_por_segmento(self):
+        casos = {
+            "Galpões Logísticos & Indústrias": "CFTV perimetral e cabeamento estruturado",
+            "Escritórios Corporativos & Serviços": "Organização de racks e servidores",
+            "Clínicas, Hospitais & Laboratórios": "CFTV em áreas comuns e recepção",
+            "Comércios & Redes de Varejo": "Infraestrutura elétrica e de TI",
+        }
+        for segmento, servico_esperado in casos.items():
+            with self.subTest(segmento=segmento):
+                r = recommend_service(segmento, [_sinal(sales_signals.OBRA_ATIVA)])
+                self.assertEqual(r["servico"], servico_esperado)
+                self.assertEqual(r["sinal_base"], sales_signals.OBRA_ATIVA)
+
+    def test_investimento_recomenda_reforco_de_seguranca_de_dados_em_escritorio(self):
+        r = recommend_service(
+            "Escritórios Corporativos & Serviços", [_sinal(sales_signals.CAPITAL_INCREASE)]
+        )
+        self.assertEqual(r["servico"], "Firewall e segurança de dados")
+
+    def test_reativacao_identificada_pelo_titulo(self):
+        r = recommend_service(
+            "Clínicas, Hospitais & Laboratórios",
+            [_sinal(sales_signals.REGISTRY_STATUS_CHANGE, titulo="Reativação cadastral na Receita")],
+        )
+        self.assertEqual(r["servico"], "Nobreaks")
+
+    def test_baixa_nao_recomenda_servico(self):
+        r = recommend_service(
+            "Clínicas, Hospitais & Laboratórios",
+            [_sinal(sales_signals.REGISTRY_STATUS_CHANGE, titulo="Baixa/inaptidão na Receita")],
+        )
+        self.assertIsNone(r)
+
+    def test_sem_segmento_ou_sem_sinal_devolve_none(self):
+        self.assertIsNone(recommend_service("Não classificado", [_sinal(sales_signals.OBRA_ATIVA)]))
+        self.assertIsNone(recommend_service("Galpões Logísticos & Indústrias", []))
+
+    def test_sinal_sem_categoria_mapeada_cai_no_primeiro_servico_do_icp(self):
+        r = recommend_service("Comércios & Redes de Varejo", [_sinal(sales_signals.NEW_PHONE)])
+        self.assertEqual(r["servico"], "CFTV contra perdas")  # primeiro item do ICP
+
+    def test_usa_o_sinal_mais_recente_quando_ha_varios(self):
+        sinais = [
+            _sinal(sales_signals.OBRA_ATIVA, detected_at="2026-01-01T00:00:00+00:00"),
+            _sinal(sales_signals.CAPITAL_INCREASE, detected_at="2026-02-01T00:00:00+00:00"),
+        ]
+        r = recommend_service("Galpões Logísticos & Indústrias", sinais)
+        self.assertEqual(r["sinal_base"], sales_signals.CAPITAL_INCREASE)
 
 
 if __name__ == "__main__":

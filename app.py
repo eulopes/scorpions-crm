@@ -99,6 +99,7 @@ from opportunity_engine import (
     conversion_rate_by_score_range,
     get_opportunity_timeline,
     recommend_next_action,
+    recommend_service,
     sincronizar_outcomes_pendentes,
 )
 import obras_dump
@@ -3560,6 +3561,15 @@ if aba_radar:
                     _linha_detalhe.to_dict(),
                 )
                 st.markdown(f"**Próxima melhor ação:** {escape(_proxima_acao)}")
+
+                _servico_sugerido = recommend_service(
+                    str(_linha_detalhe.get("segmento_icp") or ""), _sinais_detalhe
+                )
+                if _servico_sugerido and _servico_sugerido.get("servico"):
+                    st.markdown(
+                        f"**Serviço recomendado:** {escape(_servico_sugerido['servico'])} "
+                        f"— {escape(_servico_sugerido['motivo'])}"
+                    )
 
     try:
         with obras_dump.conectar() as _con_obras_radar:
