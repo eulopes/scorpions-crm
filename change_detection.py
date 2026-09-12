@@ -20,6 +20,9 @@ FONTE_RECEITA_DUMP = "Receita Federal (Dados Abertos)"
 # Alvará de obras (Fase 2) -- fonte municipal, casada por endereço/nome (fuzzy),
 # por isso a confiança parte de um patamar mais baixo que a Receita.
 FONTE_OBRAS = "Prefeitura (Alvará de Obras)"
+# CNES (Fase 3) -- cadastro federal do Ministério da Saúde, casado direto por
+# CNPJ (sem fuzzy matching), específico do ICP Clínicas/Hospitais/Laboratórios.
+FONTE_CNES = "Ministério da Saúde (CNES)"
 
 TIPOS_MUDANCA = (
     "empresa_adicionada",

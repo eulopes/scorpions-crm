@@ -14,7 +14,7 @@ import sqlite3
 from datetime import timedelta
 from typing import Any
 
-from change_detection import FONTE_OBRAS, FONTE_RECEITA, FONTE_RECEITA_DUMP
+from change_detection import FONTE_CNES, FONTE_OBRAS, FONTE_RECEITA, FONTE_RECEITA_DUMP
 from company_history import agora_utc, conectar, iso_utc
 
 NEW_BRANCH = "NEW_BRANCH"
@@ -80,6 +80,10 @@ _MAPA_TIPO_MUDANCA_PARA_SINAL = {
     "novo_estabelecimento_receita": NEW_BRANCH,
     # Alvará de obras (Fase 2).
     "obra_ativa": OBRA_ATIVA,
+    # CNES (Fase 3) -- reaproveita os mesmos sinais genéricos de expansão
+    # física; o que muda é a fonte/confiança e o texto, específicos de saúde.
+    "novo_estabelecimento_saude": NEW_BRANCH,
+    "endereco_alterado_saude": ADDRESS_CHANGE,
 }
 
 
@@ -179,6 +183,10 @@ def _forca_por_mudanca(mudanca: dict[str, Any]) -> int:
         if area >= 500:
             return 65
         return 50
+    if tipo == "novo_estabelecimento_saude":
+        return 80
+    if tipo == "endereco_alterado_saude":
+        return 55
     return 30
 
 
@@ -198,6 +206,10 @@ def _confianca_por_mudanca(mudanca: dict[str, Any], fonte: str) -> int:
         base = 75
         if mudanca.get("match_confianca") == "media":
             base -= 15
+    # CNES: cadastro federal casado direto por CNPJ (sem fuzzy) -- quase tão
+    # confiável quanto a Receita, mas é cadastro administrativo, não tributário.
+    if fonte == FONTE_CNES:
+        base = 85
     dias = mudanca.get("days_between")
     if dias is not None and dias <= 1:
         base -= 15  # mudança entre duas coletas quase simultâneas é mais suspeita
@@ -310,6 +322,23 @@ def _titulo_e_descricao(mudanca: dict[str, Any]) -> tuple[str, str]:
         if mudanca.get("match_confianca") == "media":
             corpo += " Empresa candidata pelo endereço/nome -- confirme o ocupante antes do contato."
         return "Obra ativa detectada", corpo
+    if tipo == "novo_estabelecimento_saude":
+        tipo_unidade = str(mudanca.get("tipo_unidade") or "estabelecimento de saúde")
+        depois = mudanca.get("after") if isinstance(mudanca.get("after"), dict) else {}
+        local = str(depois.get("local") or "").strip()
+        return (
+            "Nova unidade de saúde identificada",
+            f"O CNES (Ministério da Saúde) registrou uma nova unidade -- {tipo_unidade}"
+            + (f", em {local}" if local else "")
+            + ". Estrutura sendo montada agora.",
+        )
+    if tipo == "endereco_alterado_saude":
+        tipo_unidade = str(mudanca.get("tipo_unidade") or "estabelecimento de saúde")
+        return (
+            "Endereço alterado (CNES)",
+            f"O CNES registrou mudança de endereço desta unidade ({tipo_unidade}): "
+            f"de \"{mudanca['before']}\" para \"{mudanca['after']}\".",
+        )
     return "Mudança detectada", f"Campo {mudanca['field']} mudou de {mudanca['before']} para {mudanca['after']}."
 
 

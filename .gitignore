@@ -21,6 +21,7 @@ scorpions_base_legacy_backup.db
 *.duckdb
 *.duckdb.wal
 .receita_cache/
+.cnes_cache/
 
 # Arquivos externos baixados p/ analise (alvaras SP, samples de dados publicos)
 dados_externos/
