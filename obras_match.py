@@ -110,14 +110,30 @@ def normalizar_nome_empresa(nome: Any) -> frozenset[str]:
     return frozenset(t for t in tokens if len(t) >= 3)
 
 
+def _tokens_equivalentes(a: str, b: str) -> bool:
+    """Nomes de empresa em registros públicos vêm abreviados de formas
+    diferentes ('IND ELETR COMERCIO E SERV' vs 'INDUSTRIA ELETRONICA
+    COMERCIO E SERVICOS') -- trata como equivalente quando um token é
+    prefixo do outro com pelo menos 4 caracteres em comum."""
+    if a == b:
+        return True
+    curto, longo = (a, b) if len(a) <= len(b) else (b, a)
+    return len(curto) >= 4 and longo.startswith(curto)
+
+
 def _nomes_combinam(a: frozenset[str], b: frozenset[str]) -> bool:
     if not a or not b:
         return False
-    intersecao = a & b
-    if a <= b or b <= a:
-        return len(intersecao) >= 1
-    uniao = a | b
-    return len(intersecao) / len(uniao) >= 0.7
+    menor, maior = (a, b) if len(a) <= len(b) else (b, a)
+    casados_menor = {t for t in menor if any(_tokens_equivalentes(t, u) for u in maior)}
+    if not casados_menor:
+        return False
+    cobertura = len(casados_menor) / len(menor)
+    # Um único token em comum só conta se for específico o bastante (evita
+    # "comercio"/"servicos" sozinhos casando empresas sem nenhuma relação).
+    if len(casados_menor) == 1:
+        return cobertura >= 1.0 and len(next(iter(casados_menor))) >= 6
+    return cobertura >= 0.6
 
 
 def indexar_leads_por_nome(leads: Iterable[dict[str, Any]]) -> list[tuple[frozenset[str], int]]:

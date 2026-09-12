@@ -140,6 +140,25 @@ class NomeTest(unittest.TestCase):
         r = casar_alvaras([{"endereco": "", "numero": "", "municipio_nome": ""}], indice_leads=[])
         self.assertEqual(len(r["sem_ocupante"]), 1)
 
+    def test_nome_abreviado_do_sissel_casa_com_nome_por_extenso(self):
+        # Caso real: SISSEL abrevia ("IND ELETR... SERV"), a base pode ter
+        # o nome por extenso ("Industria Eletronica... Servicos").
+        leads_nome = indexar_leads_por_nome([
+            {"id": 9, "nome_empresa": "Aspect Midia Industria Eletronica Comercio e Servicos"},
+        ])
+        alvara = {"endereco": "Rua Pedralia", "numero": "399", "municipio_nome": "São Paulo",
+                  "proprietario": "ASPECT MIDIA IND ELETR COMERCIO E SERV LTDA"}
+        r = casar_alvaras([alvara], indice_leads=[], indice_leads_nome=leads_nome)
+        self.assertEqual(len(r["em_lead"]), 1)
+        self.assertEqual(r["em_lead"][0]["lead_id"], 9)
+
+    def test_uma_palavra_generica_em_comum_nao_gera_falso_positivo(self):
+        leads_nome = indexar_leads_por_nome([{"id": 1, "nome_empresa": "Alfa Comercio"}])
+        alvara = {"endereco": "", "numero": "", "municipio_nome": "",
+                  "proprietario": "Beta Comercio"}
+        r = casar_alvaras([alvara], indice_leads=[], indice_leads_nome=leads_nome)
+        self.assertEqual(r["em_lead"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

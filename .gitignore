@@ -22,6 +22,9 @@ scorpions_base_legacy_backup.db
 *.duckdb.wal
 .receita_cache/
 
+# Arquivos externos baixados p/ analise (alvaras SP, samples de dados publicos)
+dados_externos/
+
 # Logs
 *.log
 *.stdout.log
