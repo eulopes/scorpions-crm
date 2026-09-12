@@ -3126,10 +3126,19 @@ if aba_base:
         # (ambos viram ""), então isso não afeta o que é salvo -- só a exibição.
         base_editor = base[colunas].copy()
         base_editor["valor_proposta"] = pd.to_numeric(base_editor["valor_proposta"], errors="coerce")
-        base_editor["pontuacao"] = pd.to_numeric(base_editor["pontuacao"], errors="coerce")
         base_editor["proximo_contato"] = pd.to_datetime(base_editor["proximo_contato"], errors="coerce")
         for _coluna_texto_vazia in ("segmento_icp", "responsavel_nome"):
             base_editor[_coluna_texto_vazia] = base_editor[_coluna_texto_vazia].fillna("")
+        # "pontuacao" (Score) é somente leitura nesta grade -- confirmado que
+        # NumberColumn nesta versão do Streamlit mostra o texto "None" (não uma
+        # célula vazia) para valor ausente, com ou sem format/dtype nullable.
+        # Como é read-only, formatar como texto de antemão evita o bug sem
+        # custar a edição inline (valor_proposta/proximo_contato continuam
+        # editáveis e têm o mesmo problema visual, mas mexer no tipo deles
+        # tiraria o widget de edição -- fica registrado como limitação conhecida).
+        base_editor["pontuacao"] = pd.to_numeric(base_editor["pontuacao"], errors="coerce").apply(
+            lambda v: "" if pd.isna(v) else str(int(v))
+        )
 
         editado = st.data_editor(
             base_editor,
@@ -3145,9 +3154,7 @@ if aba_base:
                 "cnpj": st.column_config.TextColumn("CNPJ"),
                 "nome_empresa": st.column_config.TextColumn("Empresa"),
                 "responsavel_nome": st.column_config.TextColumn("Responsável"),
-                "pontuacao": st.column_config.NumberColumn(
-                    "Score", min_value=0, max_value=100, format="%d"
-                ),
+                "pontuacao": st.column_config.TextColumn("Score"),
                 "motivo_qualificacao": st.column_config.TextColumn("Motivo da qualificação"),
                 "segmento_icp": st.column_config.TextColumn("Segmento ICP"),
                 "servicos_recomendados": st.column_config.TextColumn("Serviços Recomendados"),
