@@ -33,7 +33,11 @@ APP_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv("RECEITA_DUMP_DB", str(APP_DIR / "receita_dump.duckdb")))
 CACHE_DIR = Path(os.getenv("RECEITA_DUMP_CACHE", str(APP_DIR / ".receita_cache")))
 
-BASE_URL = "https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj"
+# Domínio confirmado via captura do Wayback Machine (20241012) depois que
+# arquivos.receitafederal.gov.br parou de servir a listagem (virou Nextcloud).
+# Estrutura de pastas por competência (AAAA-MM) e nomes de arquivo continuam
+# os mesmos -- só o host mudou.
+BASE_URL = "https://dadosabertos.rfb.gov.br/CNPJ/dados_abertos_cnpj"
 
 # 10 fatias de Estabelecimentos + referências que interessam ao matcher.
 ARQUIVOS_ESTABELECIMENTOS = tuple(f"Estabelecimentos{i}.zip" for i in range(10))
