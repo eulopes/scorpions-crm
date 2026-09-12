@@ -23,6 +23,7 @@ from obras_sp import (  # noqa: E402
     _endereco_e_numero,
     _tipo_do_texto,
     _uso_da_categoria,
+    competencia_mais_recente,
     listar_arquivos_mes,
     mapear_linha_sissel,
     parsear_dataframe,
@@ -177,6 +178,44 @@ class IndiceTest(unittest.TestCase):
         self.assertEqual(
             resultado["2025-12"], "https://prefeitura.sp.gov.br/documents/d/licenciamento/sissel_2025_12-xls"
         )
+
+    def test_listar_arquivos_mes_resolve_href_relativo_e_pega_o_ano_mais_recente(self):
+        # Layout real (12/09/2026): o mesmo mês aparece uma vez por ano --
+        # os anos correntes usam href RELATIVO; só o arquivo histórico de
+        # 2024 ainda usa URL absoluta em outro domínio. Uma regex que só
+        # aceita "https://" nunca vê 2025/2026 -- é o bug real encontrado.
+        html = (
+            '<a href="/documents/d/licenciamento/sissel_2026_01-xls">jan</a>'
+            '<a href="/documents/d/licenciamento/sissel_2025_01-xls">jan</a>'
+            '<a href="https://www.prefeitura.sp.gov.br/cidade/secretarias/upload/licenciamento/'
+            'sissel_Janeiro_2024.xls">jan</a>'
+        )
+
+        class _Resp:
+            status_code = 200
+            text = html
+
+            def raise_for_status(self):
+                pass
+
+        class _Sessao:
+            def get(self, url, **kw):
+                return _Resp()
+
+        resultado = listar_arquivos_mes(sessao=_Sessao())
+        self.assertEqual(set(resultado), {"2026-01", "2025-01", "2024-01"})
+        self.assertEqual(
+            resultado["2026-01"],
+            "https://prefeitura.sp.gov.br/documents/d/licenciamento/sissel_2026_01-xls",
+        )
+        self.assertEqual(competencia_mais_recente(resultado), "2026-01")
+
+    def test_competencia_mais_recente_ignora_ordem_de_insercao(self):
+        disponiveis = {"2025-12": "url-dez", "2026-01": "url-jan", "2025-11": "url-nov"}
+        self.assertEqual(competencia_mais_recente(disponiveis), "2026-01")
+
+    def test_competencia_mais_recente_com_indice_vazio(self):
+        self.assertIsNone(competencia_mais_recente({}))
 
 
 if __name__ == "__main__":

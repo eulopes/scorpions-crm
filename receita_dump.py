@@ -81,6 +81,73 @@ def arquivos_da_competencia(*, com_referencia: bool = True) -> tuple[str, ...]:
     return ARQUIVOS_ESTABELECIMENTOS
 
 
+def mes_anterior(competencia: str) -> str:
+    comp = _validar_competencia(competencia)
+    ano, mes = int(comp[:4]), int(comp[5:7])
+    return f"{ano - 1}-12" if mes == 1 else f"{ano}-{mes - 1:02d}"
+
+
+def _sessao_probing() -> requests.Session:
+    """Sessão SEM retry para a sondagem de "essa competência existe?" --
+    _sessao_resiliente() tem retry=3 por chamada, o que é ótimo para um
+    download que vale a pena insistir, mas péssimo aqui: com até
+    ``tentativas`` meses testados em cascata, 3 retries cada faria uma
+    descoberta com o servidor fora do ar levar minutos em vez de segundos.
+    Uma falha já é sinal suficiente para essa competência."""
+    sessao = requests.Session()
+    sessao.headers.update({"User-Agent": "ScorpionsCRM/1.0"})
+    return sessao
+
+
+def _competencia_existe_no_servidor(competencia: str, sessao: requests.Session) -> bool:
+    """Testa se a Receita já publicou a competência (a pasta existe e serve
+    a 1ª fatia de Estabelecimentos) -- sem baixar o arquivo inteiro."""
+    url = f"{url_competencia(competencia)}/{ARQUIVOS_ESTABELECIMENTOS[0]}"
+    resposta = sessao.get(url, stream=True, timeout=(5, 8))
+    try:
+        return resposta.status_code == 200
+    finally:
+        resposta.close()
+
+
+def descobrir_competencia_mais_recente(
+    *, sessao: requests.Session | None = None, a_partir_de: str | None = None, tentativas: int = 6
+) -> str | None:
+    """Testa contra o servidor real, regredindo mês a mês a partir de
+    ``a_partir_de`` (padrão: mês corrente), até achar uma competência
+    publicada. A Receita costuma liberar o mês fiscal só na 2ª quinzena do
+    mês seguinte, então o mês corrente frequentemente ainda não existe --
+    daí a cascata em vez de assumir "mês atual" cegamente. Devolve None se
+    nenhuma das ``tentativas`` competências mais recentes existir (ex.: 404
+    em todas -- servidor no ar mas nada publicado ainda nessa janela).
+
+    Levanta ConnectionError se o servidor estiver simplesmente inacessível
+    (timeout/recusa de conexão) -- não faz sentido "tentar os próximos 5
+    meses" quando o problema é a rede, não a publicação; e silenciar isso
+    devolvendo None confundiria com o caso "nada publicado ainda"."""
+    hoje = date.today()
+    competencia = a_partir_de or f"{hoje.year:04d}-{hoje.month:02d}"
+    competencia = _validar_competencia(competencia)
+    propria = sessao is None
+    cliente = sessao or _sessao_probing()
+    try:
+        for _ in range(max(1, tentativas)):
+            try:
+                existe = _competencia_existe_no_servidor(competencia, cliente)
+            except requests.exceptions.RequestException as erro:
+                raise ConnectionError(
+                    f"Não foi possível conectar ao servidor da Receita para verificar "
+                    f"{competencia}: {erro}"
+                ) from erro
+            if existe:
+                return competencia
+            competencia = mes_anterior(competencia)
+    finally:
+        if propria:
+            cliente.close()
+    return None
+
+
 @contextmanager
 def conectar() -> Iterator[duckdb.DuckDBPyConnection]:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)

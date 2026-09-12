@@ -10,9 +10,16 @@ periodicamente (ex.: mensal, junto com a Receita) baixa a versão mais nova e
 compara contra a última carga salva.
 
 Uso:
+    python scripts/rodar_cnes.py
     python scripts/rodar_cnes.py --hoje 2026-09-12 --comparar-com 2026-08-01
     python scripts/rodar_cnes.py --hoje 2026-09-12 --ufs SP,RJ --dry-run
     python scripts/rodar_cnes.py --hoje 2026-09-12 --pular-download
+
+--comparar-com é opcional: se omitido, usa a carga mais recente já salva
+localmente (seja de ontem, semana passada ou mês passado -- o operador não
+precisa lembrar/descobrir qual foi a última data rodada). Só falha se não
+houver NENHUMA carga anterior salva (nesse caso é a primeira execução: rode
+de novo mais tarde para começar a gerar diffs).
 
 Env: CNES_DUMP_DB, CNES_DUMP_CACHE (store/cache), CRM_DB_PATH (base do CRM).
 """
@@ -63,7 +70,10 @@ def _garantir_competencia(comp: str, *, pular_download: bool, forcar_carga: bool
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--hoje", default=None, help="Data do download novo, AAAA-MM-DD (padrão: hoje).")
-    p.add_argument("--comparar-com", required=True, help="Data da carga anterior já salva, AAAA-MM-DD.")
+    p.add_argument(
+        "--comparar-com", default=None,
+        help="Data da carga anterior já salva, AAAA-MM-DD. Se omitido, usa a mais recente já carregada.",
+    )
     p.add_argument("--ufs", default=None, help="Lista separada por vírgula, ex.: SP,RJ,MG.")
     p.add_argument("--tipos", default=None, help=f"Subconjunto de {','.join(cd.TIPOS_EVENTO)}.")
     p.add_argument("--incluir-nao-classificado", action="store_true",
@@ -74,19 +84,31 @@ def main() -> int:
     args = p.parse_args()
 
     comp_novo = cd._validar_competencia(args.hoje or date.today().isoformat())
-    comp_antigo = cd._validar_competencia(args.comparar_com)
     ufs = tuple(u.strip().upper() for u in args.ufs.split(",")) if args.ufs else None
     tipos = tuple(t.strip().upper() for t in args.tipos.split(",")) if args.tipos else None
 
-    print(f"Fase 3 (CNES) — {comp_antigo} -> {comp_novo}" + (f" | UFs {','.join(ufs)}" if ufs else ""))
-
     _garantir_competencia(comp_novo, pular_download=args.pular_download, forcar_carga=args.forcar_carga)
-    with cd.conectar() as con:
-        if comp_antigo not in cd.competencias_carregadas(con):
+
+    if args.comparar_com:
+        comp_antigo = cd._validar_competencia(args.comparar_com)
+        with cd.conectar() as con:
+            if comp_antigo not in cd.competencias_carregadas(con):
+                raise SystemExit(
+                    f"Competência base {comp_antigo} não está carregada. "
+                    "Rode este script uma primeira vez apontando --hoje para essa data."
+                )
+    else:
+        with cd.conectar() as con:
+            comp_antigo = cd.competencia_mais_recente_carregada(con, anterior_a=comp_novo)
+        if not comp_antigo:
             raise SystemExit(
-                f"Competência base {comp_antigo} não está carregada. "
-                "Rode este script uma primeira vez apontando --hoje para essa data."
+                f"Nenhuma carga anterior a {comp_novo} está salva localmente -- esta é a primeira "
+                "execução. A carga de hoje foi salva; rode de novo mais tarde (amanhã, semana que "
+                "vem, etc.) para gerar o primeiro diff."
             )
+        print(f"  --comparar-com não informado: usando a carga mais recente já salva ({comp_antigo}).")
+
+    print(f"Fase 3 (CNES) — {comp_antigo} -> {comp_novo}" + (f" | UFs {','.join(ufs)}" if ufs else ""))
 
     with cd.conectar() as con:
         eventos = cd.diff_dumps(con, comp_novo, comp_antigo, tipos=tipos, ufs=ufs)

@@ -95,6 +95,21 @@ class CargaTest(unittest.TestCase):
             cnd.migrar_esquema(con)
             self.assertEqual([], cnd.competencias_carregadas(con))
 
+    def test_competencia_mais_recente_carregada(self):
+        with cnd.conectar() as con:
+            self.assertIsNone(cnd.competencia_mais_recente_carregada(con))
+            for comp in ("2026-07-01", "2026-09-01", "2026-08-01"):
+                con.execute(
+                    "INSERT INTO competencias_carregadas (competencia, linhas) VALUES (?, 0)", [comp]
+                )
+            self.assertEqual(cnd.competencia_mais_recente_carregada(con), "2026-09-01")
+            self.assertEqual(
+                cnd.competencia_mais_recente_carregada(con, anterior_a="2026-09-01"), "2026-08-01"
+            )
+            self.assertIsNone(
+                cnd.competencia_mais_recente_carregada(con, anterior_a="2026-07-01")
+            )
+
     def test_carga_de_zip_normaliza_campos(self):
         dados = _zip_cnes([_linha_cnes()])
         with tempfile.TemporaryDirectory() as tmp:

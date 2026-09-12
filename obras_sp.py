@@ -21,6 +21,7 @@ import unicodedata
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 import pandas as pd
 import requests
@@ -192,7 +193,15 @@ def parsear_planilha(caminho_ou_bytes: str | Path | bytes) -> list[dict[str, Any
 
 def listar_arquivos_mes(*, sessao: requests.Session | None = None) -> dict[str, str]:
     """Raspa a página de índice e devolve {AAAA-MM: url_do_xls} pros meses
-    listados (não compõe URL por convenção -- ela já variou entre meses)."""
+    listados (não compõe URL por convenção -- ela já variou entre meses).
+
+    O índice lista o mesmo mês (ex.: "jan") várias vezes, uma por ano -- os
+    anos mais recentes usam href RELATIVO (ex.: "/documents/d/licenciamento/
+    sissel_2026_01-xls"), enquanto o arquivo histórico de 2024 ainda usa URL
+    absoluta antiga (domínio www.prefeitura.sp.gov.br). Aceita as duas
+    formas e resolve a relativa contra o domínio do índice -- aceitar só
+    absolutas (como antes) faz a função "ver" apenas 2024 e nunca os meses
+    correntes, que é justamente quem mais importa para o orquestrador."""
     propria = sessao is None
     cliente = sessao or _sessao_resiliente()
     try:
@@ -208,16 +217,26 @@ def listar_arquivos_mes(*, sessao: requests.Session | None = None) -> dict[str, 
     }
     resultado: dict[str, str] = {}
     for m in re.finditer(
-        r'href="(https://[^"]+?/sissel[^"]*)"[^>]*>\s*(' + "|".join(meses) + r")\s*<",
+        r'href="((?:https://|/)[^"]*?/sissel[^"]*)"[^>]*>\s*(' + "|".join(meses) + r")\s*<",
         resposta.text, flags=re.IGNORECASE,
     ):
-        url, mes_txt = m.group(1), m.group(2).lower()
+        href, mes_txt = m.group(1), m.group(2).lower()
+        url = urljoin(INDICE_URL, href)
         ano = re.search(r"20\d{2}", url)
         if not ano:
             continue
         competencia = f"{ano.group(0)}-{meses[mes_txt]}"
         resultado[competencia] = url
     return resultado
+
+
+def competencia_mais_recente(disponiveis: dict[str, str]) -> str | None:
+    """A mais recente entre as competências listadas no índice -- "AAAA-MM"
+    ordena cronologicamente como string, sem precisar parsear data. Usada
+    pelo orquestrador quando --competencia não é informado, para sempre
+    processar o mês mais novo publicado pela prefeitura em vez de exigir que
+    o operador descubra isso manualmente."""
+    return max(disponiveis) if disponiveis else None
 
 
 def baixar_e_mapear(competencia: str, *, sessao: requests.Session | None = None) -> list[dict[str, Any]]:

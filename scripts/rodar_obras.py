@@ -5,9 +5,15 @@ filtra o recorte relevante, casa contra a base de leads e (opcionalmente)
 contra o dump da Receita, e injeta no CRM.
 
 Uso:
+    python scripts/rodar_obras.py
     python scripts/rodar_obras.py --competencia 2026-08
     python scripts/rodar_obras.py --competencia 2026-08 --dry-run
     python scripts/rodar_obras.py --competencia 2026-08 --arquivo local.xls
+
+--competencia é opcional: se omitido, usa a mais recente publicada no
+índice da prefeitura (não exige que o operador descubra isso manualmente).
+Obrigatório apenas em conjunto com --arquivo (não há como inferir a
+competência de um arquivo local).
 
 Env: OBRAS_DUMP_DB (store), RECEITA_DUMP_DB (opcional, camada de match extra),
 CRM_DB_PATH (base do CRM).
@@ -70,7 +76,10 @@ def _estabelecimentos_da_receita(uf: str, competencia: str | None) -> list[dict]
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--cidade", default="sao-paulo", choices=list(ADAPTERS))
-    p.add_argument("--competencia", required=True, help="AAAA-MM.")
+    p.add_argument(
+        "--competencia", default=None,
+        help="AAAA-MM. Se omitido, usa a mais recente publicada no índice da prefeitura.",
+    )
     p.add_argument("--arquivo", default=None, help="Usa um .xls local em vez de baixar.")
     p.add_argument("--area-minima", type=float, default=500.0)
     p.add_argument("--sem-receita", action="store_true", help="Não tenta casar contra o dump da Receita.")
@@ -79,7 +88,18 @@ def main() -> int:
     args = p.parse_args()
 
     adapter = ADAPTERS[args.cidade]
-    comp = od._validar_competencia(args.competencia)
+
+    if args.competencia:
+        comp = od._validar_competencia(args.competencia)
+    elif args.arquivo:
+        raise SystemExit("--competencia é obrigatório quando --arquivo é usado (não há como inferi-la de um arquivo local).")
+    else:
+        disponiveis = adapter.listar_arquivos_mes()
+        mais_recente = adapter.competencia_mais_recente(disponiveis)
+        if not mais_recente:
+            raise SystemExit("Não foi possível descobrir a competência mais recente no índice da prefeitura.")
+        comp = mais_recente
+        print(f"  --competencia não informado: usando a mais recente publicada ({comp}).")
 
     print(f"Fase 2 — {args.cidade} — {comp}")
     if args.arquivo:

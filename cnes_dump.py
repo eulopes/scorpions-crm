@@ -149,6 +149,22 @@ def competencias_carregadas(conexao: duckdb.DuckDBPyConnection) -> list[str]:
     return [linha[0] for linha in linhas]
 
 
+def competencia_mais_recente_carregada(
+    conexao: duckdb.DuckDBPyConnection, *, anterior_a: str | None = None
+) -> str | None:
+    """A última carga salva localmente -- o CNES não tem "competências"
+    fixas como a Receita (é sempre a versão mais atual do S3), então aqui
+    "mais recente disponível" é sempre a comparação com o que já foi salvo,
+    seja de hoje, ontem, semana passada ou mês passado: o operador não
+    precisa lembrar/descobrir qual foi a última data rodada.
+    ``anterior_a`` filtra para a mais recente estritamente anterior a essa
+    data -- usado ao comparar uma carga nova contra a base já existente."""
+    carregadas = competencias_carregadas(conexao)
+    if anterior_a is not None:
+        carregadas = [c for c in carregadas if c < anterior_a]
+    return carregadas[-1] if carregadas else None
+
+
 def baixar_dump(
     *, sessao: requests.Session | None = None, destino: Path | None = None
 ) -> Path:

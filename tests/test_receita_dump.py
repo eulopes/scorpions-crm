@@ -13,6 +13,8 @@ import zipfile
 from datetime import date, timedelta
 from pathlib import Path
 
+import requests
+
 _TMP = Path(tempfile.gettempdir()) / "scorpions_test_receita_dump.duckdb"
 _TMP.unlink(missing_ok=True)
 os.environ["RECEITA_DUMP_DB"] = str(_TMP)
@@ -344,6 +346,69 @@ class DownloadTest(unittest.TestCase):
                 "2026-08", apenas=("Estabelecimentos0.zip",), sessao=sessao, destino_base=base
             )
             self.assertEqual(len(sessao.urls), 1)
+
+
+class _RespStatus:
+    def __init__(self, status_code: int):
+        self.status_code = status_code
+
+    def close(self): ...
+
+
+class _SessaoStatusPorCompetencia:
+    """Simula o servidor da Receita: só as competências em ``existentes``
+    respondem 200 -- as demais, 404 (pasta ainda não publicada)."""
+
+    def __init__(self, existentes: set[str]):
+        self._existentes = existentes
+        self.urls: list[str] = []
+
+    def get(self, url, **kw):
+        self.urls.append(url)
+        comp = url.split("/")[-2]
+        return _RespStatus(200 if comp in self._existentes else 404)
+
+    def close(self): ...
+
+
+class MesAnteriorTest(unittest.TestCase):
+    def test_mes_anterior_vira_dezembro_do_ano_anterior(self):
+        self.assertEqual(rd.mes_anterior("2026-01"), "2025-12")
+
+    def test_mes_anterior_dentro_do_mesmo_ano(self):
+        self.assertEqual(rd.mes_anterior("2026-08"), "2026-07")
+
+
+class DescobrirCompetenciaTest(unittest.TestCase):
+    def test_acha_a_mais_recente_publicada_regredindo_meses(self):
+        # Mês corrente e o anterior ainda não publicados; só 2026-06 existe.
+        sessao = _SessaoStatusPorCompetencia({"2026-06"})
+        resultado = rd.descobrir_competencia_mais_recente(sessao=sessao, a_partir_de="2026-08")
+        self.assertEqual(resultado, "2026-06")
+        self.assertEqual(len(sessao.urls), 3)  # 2026-08, 2026-07, 2026-06
+
+    def test_a_propria_a_partir_de_ja_existe_nao_regride(self):
+        sessao = _SessaoStatusPorCompetencia({"2026-08"})
+        resultado = rd.descobrir_competencia_mais_recente(sessao=sessao, a_partir_de="2026-08")
+        self.assertEqual(resultado, "2026-08")
+        self.assertEqual(len(sessao.urls), 1)
+
+    def test_esgota_tentativas_e_devolve_none_sem_levantar(self):
+        sessao = _SessaoStatusPorCompetencia(set())  # servidor no ar, nada publicado ainda (404 em tudo)
+        resultado = rd.descobrir_competencia_mais_recente(sessao=sessao, a_partir_de="2026-08", tentativas=3)
+        self.assertIsNone(resultado)
+        self.assertEqual(len(sessao.urls), 3)
+
+    def test_servidor_inacessivel_levanta_connection_error_sem_esgotar_tentativas(self):
+        # Erro de conexão real (timeout, recusa) é diferente de "não
+        # publicado ainda" (404) -- não faz sentido gastar as 6 tentativas
+        # regredindo mês a mês quando o problema é a rede, não a data.
+        class _SessaoIndisponivel:
+            def get(self, url, **kw):
+                raise requests.exceptions.ConnectionError("timed out")
+
+        with self.assertRaises(ConnectionError):
+            rd.descobrir_competencia_mais_recente(sessao=_SessaoIndisponivel(), a_partir_de="2026-08")
 
 
 if __name__ == "__main__":

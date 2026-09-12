@@ -6,9 +6,16 @@ candidatos (leads + sinais) no CRM.
 Receita publica a competência nova (costuma ser na 2ª quinzena).
 
 Uso:
+    python scripts/rodar_receita_dump.py
     python scripts/rodar_receita_dump.py --competencia 2026-08
     python scripts/rodar_receita_dump.py --competencia 2026-08 --ufs SP,RJ --dry-run
     python scripts/rodar_receita_dump.py --competencia 2026-08 --comparar-com 2026-06 --pular-download
+
+--competencia é opcional: se omitido, descobre a mais recente já publicada
+testando o servidor (a Receita costuma liberar o mês fiscal só na 2ª
+quinzena do mês seguinte, então "mês corrente" nem sempre existe -- o
+script tenta em cascata mês corrente, anterior, etc.). --comparar-com
+segue opcional (padrão: mês anterior ao escolhido).
 
 Env: RECEITA_DUMP_DB, RECEITA_DUMP_CACHE (store/cache), CRM_DB_PATH (base do CRM).
 """
@@ -24,11 +31,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import receita_dump as rd  # noqa: E402
 from receita_ingest import injetar_candidatos  # noqa: E402
-
-
-def _mes_anterior(competencia: str) -> str:
-    ano, mes = int(competencia[:4]), int(competencia[5:7])
-    return f"{ano - 1}-12" if mes == 1 else f"{ano}-{mes - 1:02d}"
 
 
 def _garantir_competencia(comp: str, *, pular_download: bool, forcar_carga: bool) -> int:
@@ -69,7 +71,10 @@ def _garantir_competencia(comp: str, *, pular_download: bool, forcar_carga: bool
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--competencia", required=True, help="Competência nova, AAAA-MM.")
+    p.add_argument(
+        "--competencia", default=None,
+        help="Competência nova, AAAA-MM. Se omitido, descobre a mais recente publicada no servidor.",
+    )
     p.add_argument("--comparar-com", default=None, help="Competência base (padrão: mês anterior).")
     p.add_argument("--ufs", default=None, help="Lista separada por vírgula, ex.: SP,RJ,MG.")
     p.add_argument("--municipios", default=None, help="Códigos de município da Receita, separados por vírgula.")
@@ -81,8 +86,26 @@ def main() -> int:
     p.add_argument("--dry-run", action="store_true", help="Mostra o que faria, sem tocar no CRM.")
     args = p.parse_args()
 
-    comp_novo = rd._validar_competencia(args.competencia)
-    comp_antigo = rd._validar_competencia(args.comparar_com or _mes_anterior(comp_novo))
+    if args.competencia:
+        comp_novo = rd._validar_competencia(args.competencia)
+    else:
+        print("--competencia não informado: descobrindo a mais recente publicada no servidor...")
+        try:
+            descoberta = rd.descobrir_competencia_mais_recente()
+        except ConnectionError as erro:
+            raise SystemExit(
+                f"Servidor da Receita inacessível: {erro}\n"
+                "Tente novamente mais tarde ou informe --competencia manualmente se já souber qual usar."
+            ) from erro
+        if not descoberta:
+            raise SystemExit(
+                "O servidor respondeu, mas nenhuma competência recente parece publicada ainda "
+                "(2ª quinzena do mês é o normal). Tente novamente mais tarde ou informe "
+                "--competencia manualmente."
+            )
+        comp_novo = descoberta
+        print(f"  competência mais recente encontrada: {comp_novo}")
+    comp_antigo = rd._validar_competencia(args.comparar_com or rd.mes_anterior(comp_novo))
     ufs = tuple(u.strip().upper() for u in args.ufs.split(",")) if args.ufs else None
     municipios = tuple(m.strip() for m in args.municipios.split(",")) if args.municipios else None
     tipos = tuple(t.strip().upper() for t in args.tipos.split(",")) if args.tipos else None
