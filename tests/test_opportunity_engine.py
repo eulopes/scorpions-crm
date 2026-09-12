@@ -379,6 +379,39 @@ class RecommendServiceTest(unittest.TestCase):
         r = recommend_service("Galpões Logísticos & Indústrias", sinais)
         self.assertEqual(r["sinal_base"], sales_signals.CAPITAL_INCREASE)
 
+    def test_sinal_administrativo_mais_recente_nao_mascara_sinal_de_negocio(self):
+        # Caso real: refresh_company_intelligence (worker) gera NEW_COMPANY
+        # ("Empresa adicionada à base") automaticamente ao processar o 1º
+        # snapshot de qualquer lead novo -- alguns segundos DEPOIS do sinal
+        # de negócio que originou o lead (Fase 1/2/3). NEW_COMPANY não tem
+        # categoria comercial e não deve vencer só por ser mais recente.
+        sinais = [
+            _sinal(sales_signals.NEW_BRANCH, detected_at="2026-09-12T22:05:33+00:00"),
+            _sinal(sales_signals.NEW_COMPANY, detected_at="2026-09-12T22:05:55+00:00"),
+        ]
+        r = recommend_service("Clínicas, Hospitais & Laboratórios", sinais)
+        self.assertEqual(r["sinal_base"], sales_signals.NEW_BRANCH)
+        self.assertEqual(r["servico"], "CFTV em áreas comuns e recepção")
+
+    def test_todos_sinais_sem_categoria_usa_o_mais_recente_para_contexto(self):
+        sinais = [
+            _sinal(sales_signals.NEW_PHONE, detected_at="2026-01-01T00:00:00+00:00"),
+            _sinal(sales_signals.NEW_COMPANY, detected_at="2026-02-01T00:00:00+00:00"),
+        ]
+        r = recommend_service("Comércios & Redes de Varejo", sinais)
+        self.assertEqual(r["sinal_base"], sales_signals.NEW_COMPANY)
+        self.assertEqual(r["servico"], "CFTV contra perdas")  # fallback: primeiro item do ICP
+
+    def test_baixa_mais_recente_que_expansao_ainda_despriorizada(self):
+        sinais = [
+            _sinal(sales_signals.NEW_BRANCH, detected_at="2026-01-01T00:00:00+00:00"),
+            _sinal(
+                sales_signals.REGISTRY_STATUS_CHANGE, titulo="Baixa/inaptidão na Receita",
+                detected_at="2026-02-01T00:00:00+00:00",
+            ),
+        ]
+        self.assertIsNone(recommend_service("Clínicas, Hospitais & Laboratórios", sinais))
+
 
 if __name__ == "__main__":
     unittest.main()

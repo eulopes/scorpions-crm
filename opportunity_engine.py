@@ -391,43 +391,69 @@ _SERVICO_POR_CATEGORIA_E_SEGMENTO: dict[tuple[str, str], tuple[str, str]] = {
 }
 
 
+def _categoria_do_sinal(sinal: dict[str, Any]) -> str | None:
+    tipo = sinal.get("signal_type")
+    if tipo == _sinais.REGISTRY_STATUS_CHANGE:
+        if "Reativação" in str(sinal.get("title") or ""):
+            return "reativacao"
+        # Baixa/inaptidão ou mudança neutra: categoria própria (não None) --
+        # precisa ser escolhida como "sinal relevante" quando for a mais
+        # recente, mas tratada como "não vender" por recommend_service.
+        return "baixa"
+    return _CATEGORIA_POR_SINAL.get(tipo)
+
+
 def recommend_service(segmento_icp: str, sinais_ativos: list[dict[str, Any]]) -> dict[str, str] | None:
     """'Dado o que aconteceu, qual serviço específico oferecer e por quê?'
 
-    Cruza o segmento ICP com a categoria do sinal mais recente -- nunca
-    inventa um serviço fora da lista já definida pra aquele segmento em
+    Cruza o segmento ICP com a categoria do sinal comercial mais recente --
+    nunca inventa um serviço fora da lista já definida pra aquele segmento em
     crm_strategy.PERFIS_ICP, só decide qual item puxar pra frente. Devolve
     None quando não há segmento classificado, sinal ativo, ou quando o sinal
-    mais recente é uma baixa/inaptidão (não é hora de vender, é hora de
-    despriorizar)."""
+    relevante mais recente é uma baixa/inaptidão (não é hora de vender, é
+    hora de despriorizar).
+
+    "Mais recente" aqui significa o mais recente ENTRE OS SINAIS COM
+    CATEGORIA COMERCIAL RECONHECIDA -- não o mais recente cru por
+    detected_at. O worker de inteligência (refresh_company_intelligence)
+    gera automaticamente um sinal NEW_COMPANY ("Empresa adicionada à base")
+    na primeira vez que processa qualquer lead novo, e ele quase sempre
+    carimba um timestamp alguns segundos depois do sinal de negócio que deu
+    origem ao lead (Fase 1/2/3) -- sem essa distinção, esse ruído
+    administrativo mascararia a recomendação específica com o fallback
+    genérico em praticamente todo lead recém-criado."""
     perfil = PERFIS_ICP.get(segmento_icp)
     if not perfil or not sinais_ativos:
         return None
 
-    mais_recente = max(sinais_ativos, key=lambda s: s.get("detected_at") or "")
-    tipo_sinal = mais_recente.get("signal_type")
-    titulo_sinal = str(mais_recente.get("title") or "")
-
-    if tipo_sinal == _sinais.REGISTRY_STATUS_CHANGE:
-        if "Reativação" in titulo_sinal:
-            categoria = "reativacao"
-        else:
-            # Baixa/inaptidão ou mudança neutra: não é momento de oferecer
-            # serviço -- é sinal de despriorizar, não de vender.
-            return None
-    else:
-        categoria = _CATEGORIA_POR_SINAL.get(tipo_sinal)
-
+    ordenados = sorted(sinais_ativos, key=lambda s: s.get("detected_at") or "", reverse=True)
     servicos_do_segmento = perfil["servicos_recomendados"]
     assert isinstance(servicos_do_segmento, tuple)
 
-    par = _SERVICO_POR_CATEGORIA_E_SEGMENTO.get((categoria, segmento_icp)) if categoria else None
+    sinal_relevante = next((s for s in ordenados if _categoria_do_sinal(s) is not None), None)
+    if sinal_relevante is None:
+        # Nenhum sinal ativo carrega categoria comercial reconhecida (ex.:
+        # só crescimento de avaliações, site novo) -- recomendação genérica
+        # com o primeiro item da lista do ICP, mas ainda referenciando o
+        # sinal mais recente de todos para contexto.
+        return {
+            "servico": servicos_do_segmento[0] if servicos_do_segmento else "",
+            "motivo": "Sinal comercial recente detectado -- avalie o pacote padrão do segmento.",
+            "sinal_base": ordenados[0].get("signal_type"),
+        }
+
+    categoria = _categoria_do_sinal(sinal_relevante)
+    tipo_sinal = sinal_relevante.get("signal_type")
+    if categoria == "baixa":
+        return None
+
+    par = _SERVICO_POR_CATEGORIA_E_SEGMENTO.get((categoria, segmento_icp))
     if par:
         servico, motivo = par
         return {"servico": servico, "motivo": motivo.capitalize(), "sinal_base": tipo_sinal}
 
-    # Sinal sem categoria específica mapeada (ex.: crescimento de avaliações,
-    # site novo): recomendação genérica com o primeiro item da lista do ICP.
+    # Categoria mapeada mas sem combinação específica para este segmento:
+    # recomendação genérica com o primeiro item da lista do ICP.
     return {
         "servico": servicos_do_segmento[0] if servicos_do_segmento else "",
         "motivo": "Sinal comercial recente detectado -- avalie o pacote padrão do segmento.",
