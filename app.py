@@ -3561,14 +3561,6 @@ if aba_radar:
                 )
                 st.markdown(f"**Próxima melhor ação:** {escape(_proxima_acao)}")
 
-    st.markdown(
-        '<div class="section-title" style="margin-top:1.2rem;">Obras sem empresa identificada</div>',
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "Alvarás de obra (área grande, uso não-residencial) que a Fase 2 não conseguiu "
-        "casar com nenhuma empresa da base nem do dump da Receita -- revisão manual."
-    )
     try:
         with obras_dump.conectar() as _con_obras_radar:
             obras_dump.migrar_esquema(_con_obras_radar)
@@ -3576,26 +3568,45 @@ if aba_radar:
     except Exception:
         _obras_pendentes = []
 
+    _titulo_obras_radar = "Obras que podem virar oportunidade"
+    if _obras_pendentes:
+        _titulo_obras_radar += f" ({len(_obras_pendentes)})"
+    st.markdown(
+        f'<div class="section-title" style="margin-top:1.2rem;">{_titulo_obras_radar}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Encontramos uma obra grande (construção, reforma ou ampliação) nesse endereço, mas "
+        "ainda não sabemos qual empresa vai ocupar o espaço -- obras desse porte costumam "
+        "precisar de CFTV, controle de acesso, rede e infraestrutura elétrica. Se você souber "
+        "quem é, cadastre; a evidência já vai anexada nas observações."
+    )
+
     if not _obras_pendentes:
-        st.caption("Nenhuma pendência agora.")
+        st.caption("Nenhuma obra pendente de revisão agora.")
     else:
         _tipos_obra_rotulo = {
-            "aprovacao": "Aprovação", "execucao": "Execução", "reforma": "Reforma",
-            "demolicao": "Demolição", "regularizacao": "Regularização", "habite-se": "Habite-se",
+            "aprovacao": "Projeto aprovado", "execucao": "Em execução", "reforma": "Em reforma",
+            "demolicao": "Em demolição", "regularizacao": "Em regularização",
+            "habite-se": "Pronta para ocupação (Habite-se)",
         }
         for _obra in _obras_pendentes:
             _chave_obra = re.sub(r"[^a-zA-Z0-9_]", "_", f"{_obra['cidade']}_{_obra['id_alvara']}_{_obra['competencia']}")
             with st.container(key=f"obra_pendente_{_chave_obra}", border=True):
-                _tipo_rotulo = _tipos_obra_rotulo.get(_obra.get("tipo"), _obra.get("tipo") or "obra")
+                _tipo_rotulo = _tipos_obra_rotulo.get(_obra.get("tipo"), (_obra.get("tipo") or "obra").capitalize())
                 _area_obra = _obra.get("area_construida")
+                _data_emissao_obra = _obra.get("data_emissao")
+                _data_obra = _data_emissao_obra.strftime("%d/%m/%Y") if _data_emissao_obra else ""
                 st.markdown(f"**{escape(str(_obra.get('proprietario') or 'Proprietário não informado'))}**")
                 st.caption(
                     f"{_tipo_rotulo}"
-                    + (f" · {_area_obra:,.0f} m²" if _area_obra else "")
-                    + f" · {escape(str(_obra.get('bairro') or ''))} · {escape(str(_obra.get('municipio_nome') or ''))}"
+                    + (f" · {_area_obra:,.0f} m² de área construída" if _area_obra else "")
+                    + f" · {escape(str(_obra.get('bairro') or ''))}, {escape(str(_obra.get('municipio_nome') or ''))}"
+                    + (f" · alvará de {_data_obra}" if _data_obra else "")
                 )
+                st.caption(f"Referência: alvará nº {escape(str(_obra.get('id_alvara') or '—'))}")
                 _col_criar_obra, _col_ignorar_obra = st.columns(2)
-                if _col_criar_obra.button("Criar lead", key=f"criar_lead_{_chave_obra}", width="stretch"):
+                if _col_criar_obra.button("Cadastrar empresa", key=f"criar_lead_{_chave_obra}", width="stretch"):
                     _endereco_obra = " ".join(
                         str(p) for p in (_obra.get("endereco"), _obra.get("numero")) if p
                     ).strip()
