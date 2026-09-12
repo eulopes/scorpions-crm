@@ -75,6 +75,7 @@ class AcoesReaisTest(unittest.TestCase):
 
         test_env = {
             "CRM_DB_PATH": str(self.database),
+            "OBRAS_DUMP_DB": str(Path(self._tmp.name) / "obras_acoes.duckdb"),
             "SCORPIONS_DISABLE_WORKER": "1",
             "AUTH_USERS_JSON": "{}",
         }

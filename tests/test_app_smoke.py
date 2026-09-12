@@ -31,6 +31,7 @@ class AppSmokeTest(unittest.TestCase):
             database = Path(temp_dir) / "smoke.db"
             test_env = {
                 "CRM_DB_PATH": str(database),
+                "OBRAS_DUMP_DB": str(Path(temp_dir) / "obras_smoke.duckdb"),
                 "SCORPIONS_DISABLE_WORKER": "1",
                 "AUTH_USERS_JSON": json.dumps({"teste": password_hash}),
             }

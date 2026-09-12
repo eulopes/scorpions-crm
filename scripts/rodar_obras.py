@@ -116,6 +116,20 @@ def main() -> int:
           f"{len(resultado['novo_de_receita'])} candidato via Receita, "
           f"{len(resultado['sem_ocupante'])} sem ocupante identificado.")
 
+    # Persiste a classificação no store de obras (independente de --dry-run --
+    # é bookkeeping local, não toca o CRM) para a fila "sem ocupante" ficar
+    # disponível na tela do Radar entre execuções, sem recalcular do zero.
+    with od.conectar() as con:
+        for item in resultado["em_lead"]:
+            od.registrar_casamento(con, args.cidade, item["alvara"]["id_alvara"], comp, "em_lead", "resolvido")
+        for item in resultado["novo_de_receita"]:
+            od.registrar_casamento(con, args.cidade, item["alvara"]["id_alvara"], comp, "novo_de_receita", "resolvido")
+        for item in resultado["sem_ocupante"]:
+            alvara = item["alvara"]
+            if not alvara.get("id_alvara"):
+                continue
+            od.registrar_casamento(con, args.cidade, alvara["id_alvara"], comp, "sem_ocupante", "pendente")
+
     if args.dry_run:
         for item in resultado["em_lead"][:15]:
             print(f"  [em_lead:{item['por']}] lead #{item['lead_id']} <- alvará "

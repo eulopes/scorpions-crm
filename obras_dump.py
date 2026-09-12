@@ -143,6 +143,8 @@ def migrar_esquema(conexao: duckdb.DuckDBPyConnection) -> None:
             lng DOUBLE,
             proprietario TEXT,
             chave_endereco TEXT,
+            casamento TEXT,
+            revisao_status TEXT DEFAULT 'pendente',
             PRIMARY KEY (cidade, id_alvara, competencia)
         )
         """
@@ -152,6 +154,10 @@ def migrar_esquema(conexao: duckdb.DuckDBPyConnection) -> None:
     }
     if "proprietario" not in colunas_existentes:
         conexao.execute("ALTER TABLE alvaras ADD COLUMN proprietario TEXT")
+    if "casamento" not in colunas_existentes:
+        conexao.execute("ALTER TABLE alvaras ADD COLUMN casamento TEXT")
+    if "revisao_status" not in colunas_existentes:
+        conexao.execute("ALTER TABLE alvaras ADD COLUMN revisao_status TEXT DEFAULT 'pendente'")
     conexao.execute(
         "CREATE INDEX IF NOT EXISTS idx_alvaras_chave ON alvaras(chave_endereco)"
     )
@@ -258,6 +264,57 @@ def alvaras_relevantes(
         ORDER BY area_construida DESC NULLS LAST, data_emissao DESC
     """
     params = [cidade, comp, area_minima, *usos, *tipos]
+    cursor = conexao.execute(sql, params)
+    colunas = [d[0] for d in cursor.description]
+    return [dict(zip(colunas, linha)) for linha in cursor.fetchall()]
+
+
+# --- Fila de revisão humana ("obras sem ocupante identificado") --------------
+#
+# casar_alvaras() (obras_match.py) decide em memória se um alvará casou com
+# lead/estabelecimento ou ficou sem ocupante -- essas funções persistem essa
+# decisão para o CRM ter uma fila estável de revisão entre execuções, em vez
+# de recalcular do zero (e perder o que já foi ignorado/resolvido) a cada rodada.
+
+def registrar_casamento(
+    conexao: duckdb.DuckDBPyConnection,
+    cidade: str,
+    id_alvara: str,
+    competencia: str,
+    casamento: str,
+    revisao_status: str = "pendente",
+) -> None:
+    """casamento: 'em_lead' | 'novo_de_receita' | 'sem_ocupante'."""
+    conexao.execute(
+        "UPDATE alvaras SET casamento = ?, revisao_status = ? "
+        "WHERE cidade = ? AND id_alvara = ? AND competencia = ?",
+        [casamento, revisao_status, str(cidade or "").strip().lower(), id_alvara, _validar_competencia(competencia)],
+    )
+
+
+def marcar_revisao(
+    conexao: duckdb.DuckDBPyConnection, cidade: str, id_alvara: str, competencia: str, status: str
+) -> None:
+    """status: 'ignorado' | 'lead_criado' (ou qualquer rótulo -- não é enum
+    fechado, só o que a UI usa hoje)."""
+    conexao.execute(
+        "UPDATE alvaras SET revisao_status = ? WHERE cidade = ? AND id_alvara = ? AND competencia = ?",
+        [status, str(cidade or "").strip().lower(), id_alvara, _validar_competencia(competencia)],
+    )
+
+
+def listar_pendentes_revisao(
+    conexao: duckdb.DuckDBPyConnection, cidade: str | None = None, limite: int = 100
+) -> list[dict[str, Any]]:
+    """Fila do que ainda precisa de olho humano: sem ocupante encontrado e
+    ainda não ignorado/resolvido."""
+    sql = "SELECT * FROM alvaras WHERE casamento = 'sem_ocupante' AND revisao_status = 'pendente'"
+    params: list[Any] = []
+    if cidade:
+        sql += " AND cidade = ?"
+        params.append(str(cidade).strip().lower())
+    sql += " ORDER BY area_construida DESC NULLS LAST, data_emissao DESC LIMIT ?"
+    params.append(max(1, min(int(limite), 500)))
     cursor = conexao.execute(sql, params)
     colunas = [d[0] for d in cursor.description]
     return [dict(zip(colunas, linha)) for linha in cursor.fetchall()]

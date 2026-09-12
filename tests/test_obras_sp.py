@@ -4,13 +4,20 @@ depende de arquivo .xls real baixado."""
 
 from __future__ import annotations
 
+import os
+import tempfile
 import unittest
 from datetime import date
+from pathlib import Path
 
 import pandas as pd
 
-import obras_dump as od
-from obras_sp import (
+_TMP = Path(tempfile.gettempdir()) / "scorpions_test_obras_sp.duckdb"
+_TMP.unlink(missing_ok=True)
+os.environ["OBRAS_DUMP_DB"] = str(_TMP)
+
+import obras_dump as od  # noqa: E402
+from obras_sp import (  # noqa: E402
     _achar_colunas,
     _data,
     _endereco_e_numero,

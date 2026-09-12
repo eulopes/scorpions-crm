@@ -107,6 +107,35 @@ class StoreTest(unittest.TestCase):
             relevantes = od.alvaras_relevantes(con, "sao-paulo", "2026-08")
         self.assertEqual(relevantes[0]["proprietario"], "ASPECT MIDIA LTDA")
 
+    def test_fila_de_revisao_registrar_marcar_e_listar(self):
+        registros = [
+            _alvara(id_alvara="A1", proprietario="EMPRESA A"),
+            _alvara(id_alvara="A2", proprietario="EMPRESA B", area_construida=5000.0),
+        ]
+        with od.conectar() as con:
+            od.carregar_alvaras(con, "sao-paulo", "2026-08", registros)
+            # A1 casou com lead existente, A2 ficou sem ocupante
+            od.registrar_casamento(con, "sao-paulo", "A1", "2026-08", "em_lead", "resolvido")
+            od.registrar_casamento(con, "sao-paulo", "A2", "2026-08", "sem_ocupante", "pendente")
+
+            pendentes = od.listar_pendentes_revisao(con, "sao-paulo")
+            self.assertEqual([p["id_alvara"] for p in pendentes], ["A2"])
+            self.assertEqual(pendentes[0]["proprietario"], "EMPRESA B")
+
+            od.marcar_revisao(con, "sao-paulo", "A2", "2026-08", "ignorado")
+            self.assertEqual(od.listar_pendentes_revisao(con, "sao-paulo"), [])
+
+    def test_pendentes_ordena_por_area_maior_primeiro(self):
+        with od.conectar() as con:
+            od.carregar_alvaras(con, "sao-paulo", "2026-09", [
+                _alvara(id_alvara="P1", area_construida=600.0),
+                _alvara(id_alvara="P2", area_construida=9000.0),
+            ])
+            od.registrar_casamento(con, "sao-paulo", "P1", "2026-09", "sem_ocupante")
+            od.registrar_casamento(con, "sao-paulo", "P2", "2026-09", "sem_ocupante")
+            pendentes = od.listar_pendentes_revisao(con, "sao-paulo")
+        self.assertEqual([p["id_alvara"] for p in pendentes], ["P2", "P1"])
+
     def test_relevantes_filtra_area_uso_e_tipo(self):
         registros = [
             _alvara(id_alvara="GRANDE-COM", uso="comercial", tipo="execucao", area_construida=2000),

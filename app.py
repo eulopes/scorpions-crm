@@ -101,6 +101,7 @@ from opportunity_engine import (
     recommend_next_action,
     sincronizar_outcomes_pendentes,
 )
+import obras_dump
 from sales_signals import listar_signals_ativos
 
 
@@ -3560,6 +3561,70 @@ if aba_radar:
                 )
                 st.markdown(f"**Próxima melhor ação:** {escape(_proxima_acao)}")
 
+    st.markdown(
+        '<div class="section-title" style="margin-top:1.2rem;">Obras sem empresa identificada</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Alvarás de obra (área grande, uso não-residencial) que a Fase 2 não conseguiu "
+        "casar com nenhuma empresa da base nem do dump da Receita -- revisão manual."
+    )
+    try:
+        with obras_dump.conectar() as _con_obras_radar:
+            obras_dump.migrar_esquema(_con_obras_radar)
+            _obras_pendentes = obras_dump.listar_pendentes_revisao(_con_obras_radar)
+    except Exception:
+        _obras_pendentes = []
+
+    if not _obras_pendentes:
+        st.caption("Nenhuma pendência agora.")
+    else:
+        _tipos_obra_rotulo = {
+            "aprovacao": "Aprovação", "execucao": "Execução", "reforma": "Reforma",
+            "demolicao": "Demolição", "regularizacao": "Regularização", "habite-se": "Habite-se",
+        }
+        for _obra in _obras_pendentes:
+            _chave_obra = re.sub(r"[^a-zA-Z0-9_]", "_", f"{_obra['cidade']}_{_obra['id_alvara']}_{_obra['competencia']}")
+            with st.container(key=f"obra_pendente_{_chave_obra}", border=True):
+                _tipo_rotulo = _tipos_obra_rotulo.get(_obra.get("tipo"), _obra.get("tipo") or "obra")
+                _area_obra = _obra.get("area_construida")
+                st.markdown(f"**{escape(str(_obra.get('proprietario') or 'Proprietário não informado'))}**")
+                st.caption(
+                    f"{_tipo_rotulo}"
+                    + (f" · {_area_obra:,.0f} m²" if _area_obra else "")
+                    + f" · {escape(str(_obra.get('bairro') or ''))} · {escape(str(_obra.get('municipio_nome') or ''))}"
+                )
+                _col_criar_obra, _col_ignorar_obra = st.columns(2)
+                if _col_criar_obra.button("Criar lead", key=f"criar_lead_{_chave_obra}", width="stretch"):
+                    _endereco_obra = " ".join(
+                        str(p) for p in (_obra.get("endereco"), _obra.get("numero")) if p
+                    ).strip()
+                    _cidade_obra = ", ".join(
+                        str(p) for p in (_obra.get("municipio_nome"), _obra.get("uf")) if p
+                    )
+                    st.session_state["nova_empresa_prefill"] = {
+                        "nome_empresa": str(_obra.get("proprietario") or ""),
+                        "endereco": _endereco_obra,
+                        "cidade": _cidade_obra,
+                        "observacoes": (
+                            f"Detectado via alvará de obras ({_tipo_rotulo.lower()}"
+                            + (f", {_area_obra:,.0f} m²" if _area_obra else "")
+                            + f") em {_obra.get('bairro') or 'endereço não detalhado'}. "
+                            "Confirme os dados antes do contato comercial."
+                        ),
+                    }
+                    st.session_state["nova_empresa_prefill_obra_ref"] = (
+                        _obra["cidade"], _obra["id_alvara"], _obra["competencia"]
+                    )
+                    st.session_state["navegacao_solicitada"] = "Nova empresa"
+                    st.rerun()
+                if _col_ignorar_obra.button("Ignorar", key=f"ignorar_{_chave_obra}", width="stretch"):
+                    with obras_dump.conectar() as _con_ignorar_obra:
+                        obras_dump.marcar_revisao(
+                            _con_ignorar_obra, _obra["cidade"], _obra["id_alvara"], _obra["competencia"], "ignorado"
+                        )
+                    st.rerun()
+
 if aba_manual:
     aviso_nova_empresa = st.session_state.pop("aviso_nova_empresa", None)
     if aviso_nova_empresa:
@@ -3604,6 +3669,9 @@ if aba_manual:
                 st.error(_resultado_cnpj_manual["erro"])
             else:
                 st.session_state["nova_empresa_prefill"] = enriquecer_lead_icp(_resultado_cnpj_manual)
+                # Consulta por CNPJ é uma fonte de dado diferente da fila de obras --
+                # não associa o cadastro resultante a uma obra que não tem relação.
+                st.session_state.pop("nova_empresa_prefill_obra_ref", None)
                 st.session_state["versao_form_nova_empresa"] = _versao_form_nova + 1
                 st.rerun()
 
@@ -3646,7 +3714,9 @@ if aba_manual:
         decisor = c2.text_input("Contato/decisor", value=_prefill.get("decisor", ""), key=_campo_nova("decisor"))
         email = c1.text_input("E-mail", value=_prefill.get("email", ""), key=_campo_nova("email"))
         telefone = c2.text_input("Telefone", value=_prefill.get("telefone", ""), key=_campo_nova("telefone"))
-        observacoes = st.text_area("Observações", key=_campo_nova("obs"))
+        observacoes = st.text_area(
+            "Observações", value=_prefill.get("observacoes", ""), key=_campo_nova("obs")
+        )
 
         with st.expander(
             "Dados do pipeline (opcional)",
@@ -3694,12 +3764,21 @@ if aba_manual:
                 "decisor": decisor.strip(), "nicho": nicho.strip(), "valor_proposta": valor_proposta_manual,
                 "endereco": endereco.strip(), "cidade": cidade.strip(), "telefone": telefone.strip(), "proximo_contato": proximo_contato_manual,
                 "site": site.strip(), "email": email.strip(), "status": status_manual,
-                "status_receita": "", "origem": "Cadastro manual", "observacoes": observacoes.strip(),
+                "status_receita": "",
+                "origem": "Alvará de obras (revisão manual)" if st.session_state.get("nova_empresa_prefill_obra_ref") else "Cadastro manual",
+                "observacoes": observacoes.strip(),
             }
             inseridos, _ = salvar_leads([enriquecer_lead_icp(lead)])
             if inseridos:
                 st.cache_data.clear()
                 st.session_state.pop("nova_empresa_prefill", None)
+                _ref_obra_criada = st.session_state.pop("nova_empresa_prefill_obra_ref", None)
+                if _ref_obra_criada:
+                    try:
+                        with obras_dump.conectar() as _con_obra_criada:
+                            obras_dump.marcar_revisao(_con_obra_criada, *_ref_obra_criada, "lead_criado")
+                    except Exception:
+                        pass  # a fila de revisão é auxiliar -- não bloqueia o cadastro do lead
                 st.session_state["versao_form_nova_empresa"] = _versao_form_nova + 1
                 st.session_state["aviso_nova_empresa"] = f"Cadastrada e enviada a {status_manual}"
                 st.rerun()
