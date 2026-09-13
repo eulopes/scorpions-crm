@@ -45,3 +45,28 @@ pago por uso — confira o preço atual antes de comprometer o cartão).
 Nesse host, os dados persistem entre deploys e o worker roda de verdade —
 esta pode virar a instância "de produção" oficial, enquanto o Streamlit
 Community Cloud continua servindo como vitrine pública/superfície de teste.
+
+## Cron mensal dos pipelines de dados (Receita/Obras/CNES)
+
+`scripts/rodar_pipelines_mensais.py` dispara os três orquestradores em
+sequência (Receita Federal, Obras/SISSEL-SP, CNES) e é seguro rodar todo
+dia: cada pipeline só baixa/processa de novo quando ainda não teve sucesso
+na competência (mês) atual -- nos outros dias a checagem é só uma leitura
+de `estado_automacao`, sem custo de rede. Uma falha isolada (ex.: servidor
+da Receita fora do ar) não trava os outros dois nem impede nova tentativa
+no dia seguinte, dentro do mesmo mês.
+
+1. No projeto Railway já criado, adicione um **novo serviço → Cron Job**,
+   apontando para o mesmo repositório (`eulopes/scorpions-crm`).
+2. **Start command**: `python scripts/rodar_pipelines_mensais.py`
+3. **Schedule**: diário (ex.: `0 9 * * *`) -- o script sozinho decide se há
+   algo a fazer; não precisa acertar o dia exato do mês na config do cron.
+4. Monte o **mesmo Volume** dos serviços `web`/`worker` em `/data`, e
+   defina a mesma variável `CRM_DB_PATH=/data/scorpions_base.db` -- os três
+   processos precisam enxergar o mesmo banco.
+5. Sem variável extra além dessa: os orquestradores individuais descobrem
+   sozinhos a competência mais recente publicada em cada fonte.
+
+Pra rodar manualmente fora do dia mínimo de espera (padrão: dia 15, dando
+tempo da Receita publicar) ou ignorar o controle de "já tentei hoje":
+`python scripts/rodar_pipelines_mensais.py --forcar`.

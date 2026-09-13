@@ -31,6 +31,7 @@ ARQUIVOS_DE_TESTE = [
     "tests.test_obras_sp",
     "tests.test_cnes_dump",
     "tests.test_cnes_ingest",
+    "tests.test_rodar_pipelines_mensais",
 ]
 
 
