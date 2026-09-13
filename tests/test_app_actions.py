@@ -220,7 +220,7 @@ class AcoesReaisTest(unittest.TestCase):
             at.run(timeout=30)
             self.assertEqual([], list(at.exception))
 
-            at.button(key="abrir_confirmacao_exclusao").click()
+            at.button(key="danger_abrir_confirmacao_exclusao").click()
             at.run(timeout=30)
             self.assertEqual([], list(at.exception))
 
@@ -250,7 +250,7 @@ class AcoesReaisTest(unittest.TestCase):
             at.run(timeout=30)
             self.assertEqual([], list(at.exception))
 
-            at.button(key=f"toggle_usuario_{self.vendedor_id}").click()
+            at.button(key=f"danger_toggle_usuario_{self.vendedor_id}").click()
             at.run(timeout=30)
             self.assertEqual([], list(at.exception))
 

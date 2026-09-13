@@ -101,6 +101,7 @@ from opportunity_engine import (
     recommend_next_action,
     recommend_service,
     sincronizar_outcomes_pendentes,
+    _nivel_por_pontuacao,
 )
 import obras_dump
 from sales_signals import listar_signals_ativos
@@ -246,6 +247,42 @@ def carregar_tema_css() -> str:
     """Lê theme.css uma única vez por processo. Editar esse arquivo e reiniciar
     o Streamlit (ou limpar o cache) já reflete no visual, sem tocar em app.py."""
     return (APP_DIR / "theme.css").read_text(encoding="utf-8")
+
+
+# Mesma escala de NIVEIS_OPORTUNIDADE (opportunity_engine) aplicada à cor --
+# reaproveita as variáveis já definidas em theme.css (nunca hex solto aqui).
+# Crítica/Alta usam --danger/--warning não porque sejam "ruins": é para
+# chamar atenção de que aquela oportunidade pede ação imediata.
+_COR_POR_NIVEL_OPORTUNIDADE = {
+    "Crítica": "var(--danger)",
+    "Alta": "var(--warning)",
+    "Boa": "var(--success)",
+    "Moderada": "var(--primary)",
+    "Baixa": "var(--weak)",
+}
+
+
+def cor_por_nivel(nivel: str) -> str:
+    return _COR_POR_NIVEL_OPORTUNIDADE.get(nivel, "var(--text)")
+
+
+def cor_por_pontuacao(pontuacao: int) -> str:
+    """Mesmo critério de cor_por_nivel, mas a partir de um score bruto (0-100)
+    -- usado nos componentes individuais (Fit/Intent/Timing/Confiança), que
+    não vêm com um "nível" próprio calculado."""
+    return cor_por_nivel(_nivel_por_pontuacao(int(pontuacao)))
+
+
+def formatar_delta_score(delta: int | float | None) -> str:
+    """Delta do Opportunity Score com seta e cor -- mesma notação "▼2" que
+    o card de oportunidade do Dashboard já usa, agora também na tabela/painel
+    do Radar."""
+    valor = int(delta or 0)
+    if valor > 0:
+        return f'<span style="color:var(--success)">▲ +{valor}</span>'
+    if valor < 0:
+        return f'<span style="color:var(--danger)">▼ {valor}</span>'
+    return '<span style="color:var(--weak)">— 0</span>'
 
 
 @st.cache_resource
@@ -1645,7 +1682,7 @@ def _render_kanban_card(lead: pd.Series, etapa_atual: str) -> None:
             f"""
             <div class="kanban-card">
               <div class="kanban-topline">
-                <div class="kanban-company">{escape(str(lead['nome_empresa']))}</div>
+                <div class="kanban-company" title="{escape(str(lead['nome_empresa']))}">{escape(str(lead['nome_empresa']))}</div>
                 <div class="score-badge {score_classe}">{score_str}</div>
               </div>
               <div class="kanban-location">{escape(cidade)} · {escape(nicho)}</div>
@@ -2850,7 +2887,7 @@ if aba_automacao:
                             ativa_nova = alternar_campanha(_cid)
                             st.session_state["aviso_automacao"] = "Campanha ativada." if ativa_nova else "Campanha pausada."
                             st.rerun()
-                        if exc_col.button("Excluir", key=f"del_camp_{_cid}", width="stretch"):
+                        if exc_col.button("Excluir", key=f"danger_del_camp_{_cid}", width="stretch"):
                             st.session_state["confirmar_exclusao_campanha_id"] = _cid
                             st.session_state["confirmar_exclusao_campanha_nome"] = campanha["nome"]
                             st.rerun()
@@ -3182,8 +3219,10 @@ if aba_base:
             column_config={
                 "id": st.column_config.NumberColumn("ID", width="small"),
                 "cnpj": st.column_config.TextColumn("CNPJ"),
-                "nome_empresa": st.column_config.TextColumn("Empresa"),
-                "responsavel_nome": st.column_config.TextColumn("Responsável"),
+                "nome_empresa": st.column_config.TextColumn("Empresa", width="large"),
+                "cidade": st.column_config.TextColumn("Cidade"),
+                "nicho": st.column_config.TextColumn("Nicho"),
+                "responsavel_nome": st.column_config.TextColumn("Responsável", width="medium"),
                 "pontuacao": st.column_config.TextColumn("Score"),
                 "motivo_qualificacao": st.column_config.TextColumn("Motivo da qualificação"),
                 "segmento_icp": st.column_config.TextColumn("Segmento ICP"),
@@ -3325,7 +3364,7 @@ if aba_base:
                         key="excluir_lead_select", label_visibility="collapsed",
                     )
                     if rotulo_excluir != "Selecione..." and st.button(
-                        "Excluir", key="abrir_confirmacao_exclusao", width="stretch"
+                        "Excluir", key="danger_abrir_confirmacao_exclusao", width="stretch"
                     ):
                         st.session_state["confirmar_exclusao_lead_id"] = opcoes_empresas[rotulo_excluir]
                         st.rerun()
@@ -3420,7 +3459,7 @@ if aba_contato:
                         st.session_state.get("usuario_logado", "sistema"),
                     )
                     st.rerun()
-                if _col_suprimir.button("Não contatar mais", key=f"suprimir_{_lead_contato['id']}", width="stretch"):
+                if _col_suprimir.button("Não contatar mais", key=f"danger_suprimir_{_lead_contato['id']}", width="stretch"):
                     adicionar_supressao(
                         _lead_contato["telefone"], "Solicitado pelo lead",
                         st.session_state.get("usuario_logado", "sistema"),
@@ -3547,24 +3586,34 @@ if aba_radar:
                 _linha_detalhe = _filtrado[_filtrado["id"] == _lead_id_detalhe].iloc[0]
                 _sinais_detalhe = listar_signals_ativos(_lead_id_detalhe)
 
+                _nivel_detalhe = str(_linha_detalhe["opportunity_level"] or "")
+                _fit_detalhe = int(_linha_detalhe["fit_score"] or 0)
+                _intent_detalhe = int(_linha_detalhe["intent_score"] or 0)
+                _timing_detalhe = int(_linha_detalhe["timing_score"] or 0)
+                _confianca_detalhe = int(_linha_detalhe["data_confidence_score"] or 0)
                 st.markdown(
                     f"""
                     <div class="campaign-card">
                       <div class="head"><div class="name">{escape(str(_linha_detalhe['nome_empresa']))}</div></div>
-                      <div class="scope">Opportunity Score {int(_linha_detalhe['opportunity_score'])} · {escape(str(_linha_detalhe['opportunity_level'] or ''))}</div>
+                      <div class="scope">
+                        Opportunity Score
+                        <strong style="color:{cor_por_nivel(_nivel_detalhe)}">{int(_linha_detalhe['opportunity_score'])}</strong>
+                        · <span style="color:{cor_por_nivel(_nivel_detalhe)}">{escape(_nivel_detalhe)}</span>
+                        · {formatar_delta_score(_linha_detalhe.get('opportunity_delta'))}
+                      </div>
                       <div class="metrics">
-                        <div><div class="m-label">Fit</div><div class="m-val">{int(_linha_detalhe['fit_score'] or 0)}</div></div>
-                        <div><div class="m-label">Intent</div><div class="m-val">{int(_linha_detalhe['intent_score'] or 0)}</div></div>
-                        <div><div class="m-label">Timing</div><div class="m-val">{int(_linha_detalhe['timing_score'] or 0)}</div></div>
-                        <div><div class="m-label">Confiança</div><div class="m-val">{int(_linha_detalhe['data_confidence_score'] or 0)}</div></div>
+                        <div><div class="m-label">Fit</div><div class="m-val" style="color:{cor_por_pontuacao(_fit_detalhe)}">{_fit_detalhe}</div></div>
+                        <div><div class="m-label">Intent</div><div class="m-val" style="color:{cor_por_pontuacao(_intent_detalhe)}">{_intent_detalhe}</div></div>
+                        <div><div class="m-label">Timing</div><div class="m-val" style="color:{cor_por_pontuacao(_timing_detalhe)}">{_timing_detalhe}</div></div>
+                        <div><div class="m-label">Confiança</div><div class="m-val" style="color:{cor_por_pontuacao(_confianca_detalhe)}">{_confianca_detalhe}</div></div>
                       </div>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
 
-                st.markdown(f"**Why this company:** {escape(str(_linha_detalhe.get('opportunity_reason') or '—'))}")
-                st.markdown(f"**Why now:** {escape(str(_linha_detalhe.get('why_now') or '—'))}")
+                st.markdown(f"**Por que essa empresa:** {escape(str(_linha_detalhe.get('opportunity_reason') or '—'))}")
+                st.markdown(f"**Por que agora:** {escape(str(_linha_detalhe.get('why_now') or '—'))}")
 
                 with st.expander("Evidências", icon=":material/fact_check:"):
                     if not _sinais_detalhe:
@@ -3667,7 +3716,7 @@ if aba_radar:
                     )
                     st.session_state["navegacao_solicitada"] = "Nova empresa"
                     st.rerun()
-                if _col_ignorar_obra.button("Ignorar", key=f"ignorar_{_chave_obra}", width="stretch"):
+                if _col_ignorar_obra.button("Ignorar", key=f"danger_ignorar_{_chave_obra}", width="stretch"):
                     with obras_dump.conectar() as _con_ignorar_obra:
                         obras_dump.marcar_revisao(
                             _con_ignorar_obra, _obra["cidade"], _obra["id_alvara"], _obra["competencia"], "ignorado"
@@ -3907,9 +3956,15 @@ if aba_equipe:
                 )
                 if pode_alternar_esta_linha:
                     rotulo_botao = "Desativar" if ativo else "Ativar"
+                    # Prefixo "danger_" só quando a ação É a destrutiva
+                    # (Desativar) -- "Ativar" continua com a key/estilo neutro.
+                    _chave_toggle = (
+                        f"danger_toggle_usuario_{usuario_linha['id']}" if ativo
+                        else f"toggle_usuario_{usuario_linha['id']}"
+                    )
                     if col_acao.button(
                         rotulo_botao,
-                        key=f"toggle_usuario_{usuario_linha['id']}",
+                        key=_chave_toggle,
                         width="stretch",
                     ):
                         alternar_status_usuario(usuario_linha["id"])
@@ -4024,10 +4079,10 @@ if aba_equipe:
                 st.rerun()
 
 st.markdown(
-    """
+    f"""
     <div class="app-footer">
     <span>Scorpions CRM • Pipeline comercial e prospecção</span>
-      <span>Atualizado em 2026</span>
+      <span>Atualizado em {datetime.now().year}</span>
     </div>
     """,
     unsafe_allow_html=True,

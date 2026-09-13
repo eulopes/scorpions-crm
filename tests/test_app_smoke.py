@@ -77,8 +77,8 @@ class AppSmokeTest(unittest.TestCase):
                             self.assertGreaterEqual(len(app.dataframe), 1)
                             detalhe = app.selectbox(key="radar_detalhe_selecionado")
                             self.assertGreaterEqual(len(detalhe.options), 1)
-                            self.assertIn("Why this company", rendered_markdown)
-                            self.assertIn("Why now", rendered_markdown)
+                            self.assertIn("Por que essa empresa", rendered_markdown)
+                            self.assertIn("Por que agora", rendered_markdown)
                             self.assertIn("Próxima melhor ação", rendered_markdown)
 
     @staticmethod

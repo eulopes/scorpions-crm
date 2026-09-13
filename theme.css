@@ -880,7 +880,12 @@
       }
       .team-card .t-meta { font-size: 0.74rem; color: var(--muted); margin-top: 0.35rem; }
 
-      @media (max-height: 800px) and (min-width: 900px) {
+      /* Scroll próprio por coluna do Kanban -- sem isso, colunas vazias
+         (ex.: Vistoria Técnica) ficam com área enorme em branco enquanto a
+         coluna cheia (Novos Leads) obriga a rolar a página inteira.
+         Restrito a min-width: 900px porque em mobile as colunas empilham
+         (viram largura total) e faz mais sentido rolar a página toda. */
+      @media (min-width: 900px) {
         [class*="st-key-kanban_stage_"] {
           max-height: calc(100vh - 215px);
           overflow-y: auto;
@@ -908,4 +913,47 @@
         [class*="st-key-empty_actions_"] .stButton > button { width: 100%; }
         .sales-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .st-key-login_card { margin-top: 4vh; padding: 1.6rem 1.25rem 1.35rem; }
+      }
+
+      /* --- Botão de ação destrutiva: prefixar a key com "danger_" já
+         estiliza o botão sem precisar tocar CSS por botão (Excluir,
+         Desativar, Não contatar mais, Ignorar...). Usa a própria --danger do
+         tema em vez de um vermelho genérico novo. */
+      [class*="st-key-danger_"] button {
+        border-color: var(--danger) !important;
+        color: var(--danger) !important;
+      }
+      [class*="st-key-danger_"] button:hover {
+        background: rgba(255, 102, 125, 0.12) !important;
+        border-color: var(--danger) !important;
+        color: var(--danger-strong) !important;
+      }
+
+      /* --- Trilha do slider (ex.: "Score mínimo" do Radar) -- a trilha
+         padrão (rgb(59,59,59)) é pouco visível no tema escuro. Confirmado
+         via devtools que esta versão do Streamlit usa um <input
+         type="range"> nativo (React Aria), não o <div data-baseweb="slider">
+         de versões antigas baseadas em BaseWeb -- o seletor precisa mirar o
+         input e seus pseudo-elementos de trilha diretamente. */
+      [data-testid="stSlider"] input[type="range"] {
+        background: var(--muted) !important;
+      }
+      [data-testid="stSlider"] input[type="range"]::-webkit-slider-runnable-track {
+        background: var(--muted) !important;
+      }
+      [data-testid="stSlider"] input[type="range"]::-moz-range-track {
+        background: var(--muted) !important;
+      }
+
+      /* --- Nome de empresa truncado com reticências + tooltip nativo (via
+         atributo title no elemento) -- evita tanto estourar a altura do
+         card (Kanban) quanto cortar no meio de uma palavra sem nenhum jeito
+         de ver o nome completo. */
+      .kanban-company,
+      .nome-truncado {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+        display: block;
       }
