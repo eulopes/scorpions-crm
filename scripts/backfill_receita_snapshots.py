@@ -29,7 +29,7 @@ from receita_snapshot import buscar_snapshot_receita  # noqa: E402
 _CAMPOS = (
     "capital_social", "porte", "cnae_principal", "cnaes_secundarios_json",
     "situacao_cadastral", "data_situacao_cadastral", "natureza_juridica",
-    "qsa_hash", "qtde_socios",
+    "qsa_hash", "qtde_socios", "socios_json",
 )
 
 

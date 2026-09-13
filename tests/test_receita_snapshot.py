@@ -107,9 +107,37 @@ class MapperTest(unittest.TestCase):
         for campo in (
             "capital_social", "porte", "cnae_principal", "cnaes_secundarios_json",
             "situacao_cadastral", "data_situacao_cadastral", "natureza_juridica", "qsa_hash",
+            "socios_json",
         ):
             self.assertIsNone(resultado[campo], campo)
         self.assertEqual(resultado["qtde_socios"], 0)
+
+    def test_socios_json_traz_nome_real_e_qualificacao(self):
+        resultado = mapear_snapshot_receita(PAYLOAD_BASE)
+        socios = json.loads(resultado["socios_json"])
+        self.assertEqual(
+            socios,
+            [
+                {"nome": "FULANO DE TAL", "qualificacao": "10 - Diretor"},
+                {"nome": "BELTRANO DE TAL", "qualificacao": "10 - Diretor"},
+            ],
+        )
+
+    def test_socios_json_preserva_ordem_e_duplicata_ao_contrario_do_hash(self):
+        payload = dict(PAYLOAD_BASE)
+        payload["qsa"] = [
+            {"nome_socio": "FULANO DE TAL", "qualificacao_socio": "10 - Diretor"},
+            {"nome_socio": "FULANO DE TAL", "qualificacao_socio": "10 - Diretor"},
+        ]
+        resultado = mapear_snapshot_receita(payload)
+        socios = json.loads(resultado["socios_json"])
+        self.assertEqual(len(socios), 2)  # não deduplica -- é apresentação, não hash
+        self.assertEqual(resultado["qtde_socios"], 1)  # o hash já deduplica corretamente
+
+    def test_socio_sem_qualificacao_vira_none(self):
+        payload = {"qsa": [{"nome_socio": "SOCIO SEM CARGO"}]}
+        socios = json.loads(mapear_snapshot_receita(payload)["socios_json"])
+        self.assertEqual(socios, [{"nome": "SOCIO SEM CARGO", "qualificacao": None}])
 
     def test_qsa_hash_estavel_para_reordenacao_muda_ao_entrar_socio(self):
         base = mapear_snapshot_receita(PAYLOAD_BASE)["qsa_hash"]

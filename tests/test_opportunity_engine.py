@@ -34,7 +34,9 @@ from opportunity_engine import (  # noqa: E402
     calculate_opportunity_score,
     calculate_timing_score,
     evaluate_opportunity,
+    formatar_moeda_brl,
     generate_why_now,
+    montar_perfil_empresa,
     recommend_service,
     _nivel_por_pontuacao,
 )
@@ -191,6 +193,80 @@ class CompanyHistoryTest(unittest.TestCase):
     def test_hash_estavel_para_mesmos_dados(self):
         dados = {"company_name": "X", "rating": 4.567}
         self.assertEqual(calcular_data_hash(dados), calcular_data_hash(dict(dados)))
+
+    def test_socios_json_sobrevive_ao_armazenamento(self):
+        # Fora do hash de propósito (documentado em _COLUNAS_SNAPSHOT_RECEITA) --
+        # não deve disparar novo snapshot nem interferir em OWNERSHIP_CHANGE,
+        # que já é responsabilidade de qsa_hash.
+        socios = '[{"nome": "FULANO DE TAL", "qualificacao": "10 - Diretor"}]'
+        create_company_snapshot(
+            self.lead_id, "Receita Federal (BrasilAPI)",
+            {"company_name": "X", "qsa_hash": "abc123", "socios_json": socios},
+        )
+        atual = get_latest_snapshot(self.lead_id)
+        self.assertEqual(atual["socios_json"], socios)
+
+
+class FormatarMoedaTest(unittest.TestCase):
+    def test_formata_padrao_brasileiro(self):
+        self.assertEqual(formatar_moeda_brl(1000000), "R$ 1.000.000,00")
+        self.assertEqual(formatar_moeda_brl(1234.5), "R$ 1.234,50")
+        self.assertEqual(formatar_moeda_brl(0), "R$ 0,00")
+
+    def test_valor_none_ou_invalido_devolve_none(self):
+        self.assertIsNone(formatar_moeda_brl(None))
+        self.assertIsNone(formatar_moeda_brl("não é número"))
+
+
+class MontarPerfilEmpresaTest(unittest.TestCase):
+    def test_junta_lead_e_ultimo_snapshot(self):
+        lead_id = _inserir_lead(
+            nome_empresa="Clínica Perfil Teste", cnpj="11222333000181",
+            cidade="Sorocaba, SP", telefone="1533000000",
+        )
+        create_company_snapshot(
+            lead_id, "Receita Federal (BrasilAPI)",
+            {
+                "company_name": "Clínica Perfil Teste LTDA",
+                "porte": "DEMAIS",
+                "capital_social": 500000.0,
+                "cnae_principal": "8630-5/01 · Atividade médica ambulatorial",
+                "cnaes_secundarios_json": '["8640-2/02 · Laboratório"]',
+                "situacao_cadastral": "ATIVA",
+                "data_situacao_cadastral": "2020-01-01",
+                "natureza_juridica": "206-2 - Sociedade Empresária Limitada",
+                "qsa_hash": "abc123",
+                "socios_json": '[{"nome": "FULANO DE TAL", "qualificacao": "10 - Diretor"}]',
+            },
+        )
+        perfil = montar_perfil_empresa(lead_id)
+        self.assertEqual(perfil["nome_fantasia"], "Clínica Perfil Teste")
+        self.assertEqual(perfil["cnpj"], "11222333000181")
+        self.assertEqual(perfil["cidade"], "Sorocaba, SP")
+        self.assertEqual(perfil["porte"], "DEMAIS")
+        self.assertEqual(perfil["capital_social_formatado"], "R$ 500.000,00")
+        self.assertEqual(perfil["cnae_principal"], "8630-5/01 · Atividade médica ambulatorial")
+        self.assertEqual(perfil["cnaes_secundarios"], ["8640-2/02 · Laboratório"])
+        self.assertEqual(perfil["situacao_cadastral"], "ATIVA")
+        self.assertEqual(perfil["natureza_juridica"], "206-2 - Sociedade Empresária Limitada")
+        self.assertEqual(
+            perfil["socios"], [{"nome": "FULANO DE TAL", "qualificacao": "10 - Diretor"}]
+        )
+        self.assertTrue(perfil["tem_dados_receita"])
+
+    def test_sem_snapshot_nenhum_devolve_campos_vazios_sem_quebrar(self):
+        lead_id = _inserir_lead(nome_empresa="Sem Snapshot Ainda")
+        perfil = montar_perfil_empresa(lead_id)
+        self.assertEqual(perfil["nome_fantasia"], "Sem Snapshot Ainda")
+        self.assertIsNone(perfil["porte"])
+        self.assertIsNone(perfil["capital_social_formatado"])
+        self.assertEqual(perfil["cnaes_secundarios"], [])
+        self.assertEqual(perfil["socios"], [])
+        self.assertFalse(perfil["tem_dados_receita"])
+
+    def test_lead_inexistente_levanta(self):
+        with self.assertRaises(ValueError):
+            montar_perfil_empresa(999999)
 
 
 class SalesSignalsTest(unittest.TestCase):

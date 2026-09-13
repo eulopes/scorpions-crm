@@ -34,6 +34,7 @@ CAMPOS_RECEITA = (
     "natureza_juridica",
     "qsa_hash",
     "qtde_socios",
+    "socios_json",
     "address",
 )
 
@@ -117,6 +118,28 @@ def _qsa_hash(dados: dict[str, Any]) -> tuple[str | None, int]:
     return hashlib.sha256(bruto.encode("utf-8")).hexdigest(), len(set(assinaturas))
 
 
+def _socios(dados: dict[str, Any]) -> str | None:
+    """Nomes e qualificações reais do quadro societário, para exibição --
+    ao contrário de ``_qsa_hash`` (que só serve para detectar mudança e
+    descarta o nome), isto é o dado que o vendedor lê antes de ligar.
+    Preserva a ordem e eventuais duplicatas da própria Receita -- não é
+    usado para hash/comparação, só para apresentação."""
+    socios = dados.get("qsa") or []
+    lista: list[dict[str, str]] = []
+    for socio in socios:
+        if not isinstance(socio, dict):
+            continue
+        nome = _texto(socio.get("nome_socio") or socio.get("nome"))
+        qualificacao = _texto(
+            socio.get("qualificacao_socio") or socio.get("codigo_qualificacao_socio")
+        )
+        if nome:
+            lista.append({"nome": nome, "qualificacao": qualificacao or None})
+    if not lista:
+        return None
+    return json.dumps(lista, ensure_ascii=False)
+
+
 def _endereco(dados: dict[str, Any]) -> str:
     logradouro = _texto(dados.get("logradouro"))
     numero = _texto(dados.get("numero"))
@@ -162,6 +185,7 @@ def mapear_snapshot_receita(dados: dict[str, Any]) -> dict[str, Any]:
         "natureza_juridica": _texto(dados.get("natureza_juridica")) or None,
         "qsa_hash": qsa_hash,
         "qtde_socios": qtde_socios,
+        "socios_json": _socios(dados),
         "address": endereco or None,
     }
 

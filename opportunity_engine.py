@@ -698,6 +698,76 @@ def conversion_rate_by_score_range() -> list[dict[str, Any]]:
     return resultado
 
 
+def formatar_moeda_brl(valor: Any) -> str | None:
+    """Formata um número como R$ no padrão brasileiro sem depender de locale
+    do sistema operacional (que varia entre máquina de dev e produção)."""
+    if valor is None:
+        return None
+    try:
+        numero = float(valor)
+    except (TypeError, ValueError):
+        return None
+    inteiro, _, decimal = f"{numero:,.2f}".partition(".")
+    inteiro = inteiro.replace(",", ".")
+    return f"R$ {inteiro},{decimal}"
+
+
+def _lista_json(bruto: Any) -> list[Any]:
+    """Desserializa um campo *_json do snapshot (cnaes_secundarios_json,
+    socios_json) -- nunca quebra em dado malformado, só devolve vazio."""
+    if not bruto:
+        return []
+    if isinstance(bruto, list):
+        return bruto
+    try:
+        valor = json.loads(bruto)
+    except (TypeError, ValueError):
+        return []
+    return valor if isinstance(valor, list) else []
+
+
+def montar_perfil_empresa(lead_id: int) -> dict[str, Any]:
+    """Consolida, num único dicionário, tudo que o CRM já sabe sobre a
+    empresa antes do vendedor abordar -- hoje espalhado em colunas de
+    company_snapshots que nunca chegam à tela (capital social, porte, CNAE,
+    situação cadastral, sócios reais). Função pura de leitura: não decide
+    nada, só junta o que já foi coletado (Receita, via automation.py)."""
+    with conectar() as conexao:
+        linha = conexao.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
+    if not linha:
+        raise ValueError(f"Lead {lead_id} não encontrado.")
+    lead = dict(linha)
+    snapshots = listar_snapshots(lead_id, limite=1)
+    ultimo = snapshots[0] if snapshots else {}
+
+    capital_social = ultimo.get("capital_social")
+    return {
+        "lead_id": lead_id,
+        "place_id": lead.get("place_id"),
+        "nome_fantasia": lead.get("nome_empresa"),
+        "razao_social": lead.get("razao_social") or ultimo.get("company_name"),
+        "cnpj": lead.get("cnpj"),
+        "endereco": lead.get("endereco") or ultimo.get("address"),
+        "cidade": lead.get("cidade"),
+        "telefone": lead.get("telefone"),
+        "email": lead.get("email"),
+        "site": lead.get("site"),
+        "porte": ultimo.get("porte"),
+        "capital_social": capital_social,
+        "capital_social_formatado": formatar_moeda_brl(capital_social),
+        "cnae_principal": ultimo.get("cnae_principal"),
+        "cnaes_secundarios": _lista_json(ultimo.get("cnaes_secundarios_json")),
+        "situacao_cadastral": ultimo.get("situacao_cadastral"),
+        "data_situacao_cadastral": ultimo.get("data_situacao_cadastral"),
+        "natureza_juridica": ultimo.get("natureza_juridica"),
+        "socios": _lista_json(ultimo.get("socios_json")),
+        "dados_atualizados_em": ultimo.get("captured_at"),
+        "tem_dados_receita": bool(
+            ultimo.get("porte") or capital_social or ultimo.get("cnae_principal")
+        ),
+    }
+
+
 def build_company_features(lead_id: int) -> dict[str, Any]:
     """Extrai atributos determinísticos -- preparação para um futuro motor de
     lookalike; não implementa nenhum ML nesta fase."""

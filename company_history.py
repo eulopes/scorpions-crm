@@ -46,6 +46,12 @@ _COLUNAS_SNAPSHOT_RECEITA = {
     "natureza_juridica": "TEXT",
     "qsa_hash": "TEXT",
     "qtde_socios": "INTEGER",
+    # Nomes/qualificações reais do quadro societário -- ao contrário de
+    # qsa_hash (só serve para detectar mudança), isto é para exibição direta
+    # no perfil da empresa. Fora de CAMPOS_SNAPSHOT/hash de propósito: não
+    # deve disparar um novo snapshot nem interferir na detecção de
+    # OWNERSHIP_CHANGE, que já é responsabilidade do qsa_hash.
+    "socios_json": "TEXT",
 }
 
 
@@ -107,6 +113,7 @@ def migrar_esquema(conexao: sqlite3.Connection) -> None:
             natureza_juridica TEXT,
             qsa_hash TEXT,
             qtde_socios INTEGER,
+            socios_json TEXT,
             raw_data_json TEXT,
             FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
         )
@@ -172,8 +179,8 @@ def create_company_snapshot(
                 rating, reviews_count, categories_json, units_detected,
                 capital_social, porte, cnae_principal, cnaes_secundarios_json,
                 situacao_cadastral, data_situacao_cadastral, natureza_juridica,
-                qsa_hash, qtde_socios, raw_data_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                qsa_hash, qtde_socios, socios_json, raw_data_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 lead_id, source, agora, data_hash,
@@ -189,7 +196,7 @@ def create_company_snapshot(
                 _serializar_categorias(dados.get("cnaes_secundarios_json")),
                 dados.get("situacao_cadastral"), dados.get("data_situacao_cadastral"),
                 dados.get("natureza_juridica"),
-                dados.get("qsa_hash"), dados.get("qtde_socios"),
+                dados.get("qsa_hash"), dados.get("qtde_socios"), dados.get("socios_json"),
                 json.dumps(raw_data, ensure_ascii=False, default=str) if raw_data is not None else None,
             ),
         )

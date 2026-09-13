@@ -98,6 +98,7 @@ from opportunity_engine import (
     NIVEIS_OPORTUNIDADE,
     conversion_rate_by_score_range,
     get_opportunity_timeline,
+    montar_perfil_empresa,
     recommend_next_action,
     recommend_service,
     sincronizar_outcomes_pendentes,
@@ -1001,6 +1002,97 @@ def formatar_cnpj(cnpj: str) -> str:
     return f"{numero[:2]}.{numero[2:5]}.{numero[5:8]}/{numero[8:12]}-{numero[12:]}"
 
 
+def _fmt_data_radar(valor: Any) -> str:
+    if not valor:
+        return "—"
+    convertido = pd.to_datetime(valor, errors="coerce", utc=True)
+    return convertido.strftime("%d/%m/%Y %H:%M") if pd.notna(convertido) else str(valor)
+
+
+def render_perfil_empresa_receita(lead_id: int) -> None:
+    """Perfil consolidado da empresa (porte, capital social, CNAE, situação
+    cadastral, sócios reais) -- dados que a coleta automática da Receita já
+    guarda em company_snapshots mas nunca apareciam em tela nenhuma antes de
+    o vendedor abordar. Reutilizado no Radar e em Clientes/Empresas."""
+    perfil = montar_perfil_empresa(lead_id)
+    if not perfil.get("tem_dados_receita"):
+        st.caption(
+            "Ainda não enriquecido com dados da Receita Federal (porte, capital social, "
+            "CNAE, quadro societário). Isso acontece automaticamente em segundo plano "
+            "para leads com CNPJ válido."
+        )
+        return
+
+    situacao = str(perfil.get("situacao_cadastral") or "não informada")
+    if perfil.get("data_situacao_cadastral"):
+        situacao += f" (desde {escape(str(perfil['data_situacao_cadastral']))})"
+
+    campos_perfil = [
+        ("Porte", perfil.get("porte") or "não informado"),
+        ("Capital social", perfil.get("capital_social_formatado") or "não informado"),
+        ("Natureza jurídica", perfil.get("natureza_juridica") or "não informada"),
+        ("Situação cadastral", situacao),
+        ("CNAE principal", perfil.get("cnae_principal") or "não informado"),
+    ]
+    cols_perfil = st.columns(2)
+    for indice, (rotulo, valor) in enumerate(campos_perfil):
+        with cols_perfil[indice % 2]:
+            st.markdown(
+                f'<div class="detail-item"><div class="detail-label">{escape(rotulo)}</div>'
+                f'<div class="detail-value">{escape(str(valor))}</div></div>',
+                unsafe_allow_html=True,
+            )
+
+    if perfil.get("cnaes_secundarios"):
+        st.markdown(
+            '<div class="detail-item"><div class="detail-label">CNAEs secundários</div>'
+            f'<div class="detail-value">{escape("; ".join(perfil["cnaes_secundarios"]))}</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    if perfil.get("socios"):
+        descricao_socios = "; ".join(
+            escape(str(socio.get("nome") or ""))
+            + (f" ({escape(str(socio['qualificacao']))})" if socio.get("qualificacao") else "")
+            for socio in perfil["socios"]
+        )
+        st.markdown(
+            '<div class="detail-item"><div class="detail-label">Quadro societário</div>'
+            f'<div class="detail-value">{descricao_socios}</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    if perfil.get("dados_atualizados_em"):
+        st.caption(f"Dados da Receita atualizados em {_fmt_data_radar(perfil['dados_atualizados_em'])}.")
+
+    place_id_google = _place_id_do_google(perfil.get("place_id"))
+    if place_id_google and configurar_google_places():
+        chave_estado = f"google_detalhes_{lead_id}"
+        if st.button(
+            "Consultar avaliações no Google", key=f"consultar_google_{lead_id}",
+            icon=":material/travel_explore:",
+        ):
+            st.session_state[chave_estado] = buscar_detalhes_google_place(place_id_google) or {}
+        if chave_estado in st.session_state:
+            detalhes_google = st.session_state[chave_estado]
+            partes = []
+            if detalhes_google.get("rating") is not None:
+                texto = f"{detalhes_google['rating']:.1f} ★"
+                if detalhes_google.get("reviews_count") is not None:
+                    texto += f" ({detalhes_google['reviews_count']} avaliações)"
+                partes.append(texto)
+            if detalhes_google.get("aberto_agora") is not None:
+                partes.append("aberto agora" if detalhes_google["aberto_agora"] else "fechado no momento")
+            if detalhes_google.get("website"):
+                partes.append(f"[site]({detalhes_google['website']})")
+            if detalhes_google.get("maps_url"):
+                partes.append(f"[Google Maps]({detalhes_google['maps_url']})")
+            if partes:
+                st.markdown(" · ".join(partes))
+            else:
+                st.caption("O Google não retornou avaliações, site ou horário para esta empresa.")
+
+
 def _juntar_endereco(dados: dict[str, Any]) -> str:
     logradouro = str(dados.get("logradouro") or "").strip()
     numero = str(dados.get("numero") or "").strip()
@@ -1280,6 +1372,58 @@ def buscar_google_places(nicho: str, localizacao: str, limite: int) -> list[dict
             break
         time.sleep(1)
     return leads
+
+
+GOOGLE_PLACE_DETAILS_URL = "https://places.googleapis.com/v1/places/{place_id}"
+
+
+def _place_id_do_google(lead_place_id: str | None) -> str | None:
+    """Só os IDs vindos de verdade da busca do Google Places (sem prefixo
+    tipo "bacen:", "receita:", "cnes:", "cvm:", "b3:", "demo:" usado pelas
+    outras fontes) -- nunca refazemos uma busca por nome para "adivinhar" o
+    place certo: mostrar avaliação/site de uma empresa errada é pior do que
+    não mostrar nada."""
+    valor = str(lead_place_id or "").strip()
+    if not valor or ":" in valor:
+        return None
+    return valor
+
+
+@st.cache_data(ttl=60 * 60 * 24, show_spinner=False)
+def buscar_detalhes_google_place(place_id: str) -> dict[str, Any] | None:
+    """Enriquecimento SOB DEMANDA (só quando o vendedor pede) com rating,
+    quantidade de avaliações e site via Google Places Details -- ao
+    contrário da prospecção em massa, uma consulta isolada por clique tem
+    custo desprezível e não precisa de paginação. Cacheado por 24h: reabrir
+    o mesmo perfil no mesmo dia não gasta cota de novo."""
+    chave = os.getenv("GOOGLE_PLACES_API_KEY", "").strip()
+    if not chave:
+        return None
+    headers = {
+        "X-Goog-Api-Key": chave,
+        "X-Goog-FieldMask": "rating,userRatingCount,websiteUri,googleMapsUri,currentOpeningHours.openNow",
+    }
+    try:
+        resposta = requests.get(
+            GOOGLE_PLACE_DETAILS_URL.format(place_id=place_id), headers=headers, timeout=15
+        )
+    except requests.RequestException:
+        return None
+    if not resposta.ok:
+        return None
+    try:
+        dados = resposta.json()
+    except ValueError:
+        return None
+    if not isinstance(dados, dict):
+        return None
+    return {
+        "rating": dados.get("rating"),
+        "reviews_count": dados.get("userRatingCount"),
+        "website": dados.get("websiteUri"),
+        "maps_url": dados.get("googleMapsUri"),
+        "aberto_agora": (dados.get("currentOpeningHours") or {}).get("openNow"),
+    }
 
 
 def gerar_demonstracao(nicho: str, localizacao: str, limite: int) -> list[dict[str, Any]]:
@@ -3290,6 +3434,12 @@ if aba_base:
                             unsafe_allow_html=True,
                         )
 
+                st.markdown(
+                    '<div class="section-title" style="margin-top:0.9rem;">Perfil da empresa (Receita)</div>',
+                    unsafe_allow_html=True,
+                )
+                render_perfil_empresa_receita(int(linha_detalhe["id"]))
+
         csv_data = base.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="Exportar visão atual para CSV",
@@ -3492,12 +3642,6 @@ if aba_contato:
             else:
                 st.warning("Informe um telefone.")
 
-def _fmt_data_radar(valor: Any) -> str:
-    if not valor:
-        return "—"
-    convertido = pd.to_datetime(valor, errors="coerce", utc=True)
-    return convertido.strftime("%d/%m/%Y %H:%M") if pd.notna(convertido) else str(valor)
-
 
 if aba_radar:
     _base_radar = leads_visiveis()
@@ -3614,6 +3758,9 @@ if aba_radar:
 
                 st.markdown(f"**Por que essa empresa:** {escape(str(_linha_detalhe.get('opportunity_reason') or '—'))}")
                 st.markdown(f"**Por que agora:** {escape(str(_linha_detalhe.get('why_now') or '—'))}")
+
+                with st.expander("Perfil da empresa (Receita)", icon=":material/apartment:"):
+                    render_perfil_empresa_receita(_lead_id_detalhe)
 
                 with st.expander("Evidências", icon=":material/fact_check:"):
                     if not _sinais_detalhe:
