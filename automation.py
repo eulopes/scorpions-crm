@@ -47,6 +47,7 @@ from sales_signals import derive_signals_from_changes
 from sales_signals import migrar_esquema as _migrar_esquema_sales_signals
 from opportunity_engine import evaluate_opportunity, sincronizar_outcomes_pendentes
 from opportunity_engine import migrar_esquema as _migrar_esquema_opportunity_engine
+from receita_snapshot import buscar_snapshot_receita
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -363,6 +364,10 @@ def iniciar_banco_automacao() -> None:
             "valor_proposta": "REAL",
             "alerta_vencido_em": "TEXT",
             "proximo_contato": "TEXT",
+            # Duplicado de app.iniciar_banco (RBAC): salvar_leads_no_banco grava
+            # nesta coluna, então ela precisa existir mesmo quando o schema é
+            # criado só pelo caminho de automation (worker, scripts, testes).
+            "responsavel_usuario_id": "INTEGER",
             "fit_score": "INTEGER",
             "intent_score": "INTEGER",
             "timing_score": "INTEGER",
@@ -489,6 +494,18 @@ def telefone_suprimido(telefone: str) -> bool:
             "SELECT 1 FROM lista_supressao_contato WHERE telefone = ?", (digitos,)
         ).fetchone()
     return linha is not None
+
+
+def listar_telefones_suprimidos() -> set[str]:
+    """Todos os telefones (já normalizados) na lista de supressão, numa
+    query só -- para checar pertencimento em memória (O(1) por lead) em vez
+    de uma conexão + query por lead via telefone_suprimido(). Necessário
+    desde que a base passou a ter dezenas de milhares de leads (CNES): o
+    padrão anterior -- uma chamada de telefone_suprimido() por linha dentro
+    de um loop sobre toda a base -- travava a tela de Contato nesse volume."""
+    with conectar() as conexao:
+        linhas = conexao.execute("SELECT telefone FROM lista_supressao_contato").fetchall()
+    return {linha["telefone"] for linha in linhas}
 
 
 def adicionar_supressao(telefone: str, motivo: str, usuario: str) -> None:
@@ -2412,15 +2429,29 @@ def _verificar_e_alertar_vencidos() -> int:
 LIMITE_REFRESH_INTELIGENCIA_POR_CICLO = 15
 
 
+_CAMPOS_ENRIQUECIMENTO_RECEITA = (
+    "capital_social", "porte", "cnae_principal", "cnaes_secundarios_json",
+    "situacao_cadastral", "data_situacao_cadastral", "natureza_juridica",
+    "qsa_hash", "qtde_socios", "socios_json",
+)
+
+
 def _montar_snapshot_a_partir_de_lead(lead: dict[str, Any]) -> dict[str, Any]:
-    """Traduz as colunas já existentes de `leads` pro formato de snapshot --
-    não faz nenhuma chamada HTTP nova, só reaproveita o que já está salvo."""
+    """Traduz as colunas de `leads` pro formato de snapshot e, quando o lead
+    tem CNPJ válido, enriquece com os campos firmográficos da Receita
+    (BrasilAPI). A chamada HTTP falha em silêncio -- o snapshot ainda é criado
+    com o que já se sabia. Desativável com
+    SCORPIONS_DISABLE_RECEITA_ENRIQUECIMENTO=1 (útil em ambiente sem rede).
+
+    O endereço vindo da Receita NÃO sobrescreve o do lead: até todos os
+    baselines serem re-coletados com dados da Receita, a diferença de
+    formatação dispararia um falso "endereço alterado"."""
     cidade_bruta = str(lead.get("cidade") or "").strip()
     try:
         cidade, uf = separar_cidade_uf(cidade_bruta, permite_brasil=True)
     except ValueError:
         cidade, uf = cidade_bruta, ""
-    return {
+    snapshot = {
         "lead_id": lead["id"],
         "company_name": lead.get("razao_social") or lead.get("nome_empresa"),
         "trade_name": lead.get("nome_empresa"),
@@ -2437,6 +2468,18 @@ def _montar_snapshot_a_partir_de_lead(lead: dict[str, Any]) -> dict[str, Any]:
         "categories_json": lead.get("nicho"),
         "units_detected": None,
     }
+
+    if os.getenv("SCORPIONS_DISABLE_RECEITA_ENRIQUECIMENTO", "").strip() != "1":
+        cnpj = normalizar_cnpj(lead.get("cnpj"))
+        if cnpj:
+            receita = buscar_snapshot_receita(cnpj)
+            time.sleep(0.35)  # espaça as chamadas à BrasilAPI entre leads do ciclo
+            if receita:
+                for campo in _CAMPOS_ENRIQUECIMENTO_RECEITA:
+                    if receita.get(campo) is not None:
+                        snapshot[campo] = receita[campo]
+
+    return snapshot
 
 
 def _leads_elegiveis_para_inteligencia(limite: int) -> list[dict[str, Any]]:

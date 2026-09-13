@@ -5,3 +5,5 @@ beautifulsoup4
 tzdata
 urllib3
 bcrypt
+duckdb
+xlrd

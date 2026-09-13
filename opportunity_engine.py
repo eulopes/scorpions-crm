@@ -18,6 +18,7 @@ from company_history import agora_utc, conectar, iso_utc, listar_snapshots
 from crm_strategy import PERFIS_ICP
 from niche_sources import normalizar_cnpj
 from sales_signals import calculate_signal_decay, listar_signals_ativos
+import sales_signals as _sinais
 
 # Pesos centralizados -- nunca hardcoded dentro da função de cálculo, pra
 # poder ajustar o comportamento do produto sem tocar em lógica.
@@ -103,9 +104,20 @@ def _dias_desde(momento_iso: str | None) -> int:
     return max(0, (agora_utc() - instante).days)
 
 
+_PORTE_PONTOS = {
+    "DEMAIS": 12,
+    "EMPRESA DE PEQUENO PORTE": 4,
+    "MICRO EMPRESA": 0,
+}
+
+
 def calculate_fit_score(lead: dict[str, Any], ultimo_snapshot: dict[str, Any] | None) -> int:
     """'Quanto esta empresa combina com o cliente ideal?' -- sem eventos
-    temporais, só características firmográficas já conhecidas do lead."""
+    temporais, só características firmográficas já conhecidas do lead.
+
+    Porte e capital social (Receita) entram como reforço: uma empresa maior
+    tende a ter galpão, várias unidades e necessidade real de infra. São
+    bônus sobre um teto de 100 -- um match forte de ICP já satura sozinho."""
     pontos = 0
     segmento = str(lead.get("segmento_icp") or "").strip()
     if segmento and segmento in PERFIS_ICP:
@@ -114,12 +126,25 @@ def calculate_fit_score(lead: dict[str, Any], ultimo_snapshot: dict[str, Any] | 
         pontos += 15
     if str(lead.get("cidade") or "").strip():
         pontos += 10
-    unidades = (ultimo_snapshot or {}).get("units_detected") or 0
+    snapshot = ultimo_snapshot or {}
+    unidades = snapshot.get("units_detected") or 0
     try:
         if int(unidades) >= 2:
             pontos += 20
     except (TypeError, ValueError):
         pass
+
+    porte = str(snapshot.get("porte") or "").strip().upper()
+    pontos += _PORTE_PONTOS.get(porte, 0)
+    try:
+        capital = float(snapshot.get("capital_social") or 0)
+    except (TypeError, ValueError):
+        capital = 0.0
+    if capital >= 1_000_000:
+        pontos += 12
+    elif capital >= 200_000:
+        pontos += 6
+
     return min(100, pontos)
 
 
@@ -150,9 +175,28 @@ def calculate_data_confidence(lead: dict[str, Any], snapshots: list[dict[str, An
     return min(100, pontos)
 
 
+def _sinais_com_peso_comercial(sinais_ativos: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Filtra fora sinais puramente administrativos (hoje, só NEW_COMPANY --
+    "Empresa adicionada à base", gerado automaticamente pelo worker de
+    inteligência ao criar o 1º snapshot de qualquer lead novo) do cálculo de
+    Intent/Timing/Why-now.
+
+    NEW_COMPANY não representa nenhuma intenção ou momento de compra -- é só
+    o registro de que passamos a monitorar a empresa. Sem esse filtro, ele
+    dilui a força média de praticamente todo lead trazido por uma fonte
+    automatizada (Receita/Obras/CNES): o lead sempre chega com um
+    NEW_COMPANY "de brinde" (força 35) ao lado do sinal de negócio real
+    (força 80-90), empurrando a média para a faixa "moderada" mesmo quando o
+    sinal de negócio sozinho seria "alto". Encontrado em QA: o texto "Why
+    now" do Radar saía idêntico ("...sinal moderado...") em toda empresa
+    recém-criada, independente do sinal de origem."""
+    return [s for s in sinais_ativos if s.get("signal_type") != _sinais.NEW_COMPANY]
+
+
 def calculate_intent_score(sinais_ativos: list[dict[str, Any]]) -> int:
     """'Existem sinais observáveis de necessidade ou mudança comercial?' --
     baseado só em Sales Signals reais, nunca em posse de telefone/site/CNPJ."""
+    sinais_ativos = _sinais_com_peso_comercial(sinais_ativos)
     if not sinais_ativos:
         return 0
     soma_ponderada = 0.0
@@ -172,6 +216,7 @@ def calculate_intent_score(sinais_ativos: list[dict[str, Any]]) -> int:
 def calculate_timing_score(sinais_ativos: list[dict[str, Any]]) -> int:
     """'Existe motivo para abordar esta empresa agora?' -- depende só de
     recência/combinação de sinais; Fit alto sozinho não gera Timing alto."""
+    sinais_ativos = _sinais_com_peso_comercial(sinais_ativos)
     if not sinais_ativos:
         return 0
     decaimentos = [
@@ -205,7 +250,15 @@ def generate_why_company(lead: dict[str, Any], fit: int) -> str:
 
 def generate_why_now(sinais_ativos: list[dict[str, Any]]) -> dict[str, Any]:
     """Separa FACT (o que foi observado), INFERENCE (o que isso pode indicar)
-    e RECOMMENDATION -- nunca apresenta inferência como se fosse fato."""
+    e RECOMMENDATION -- nunca apresenta inferência como se fosse fato.
+
+    Ignora sinais puramente administrativos (NEW_COMPANY) na análise -- eles
+    continuam visíveis na seção "Evidências" (build_evidence, sem filtro,
+    para transparência total), mas não participam da inferência de
+    urgência: "empresa entrou na base" não é um fato comercial, e deixá-lo
+    aqui sempre empurrava o texto para "sinal moderado" (ver
+    _sinais_com_peso_comercial)."""
+    sinais_ativos = _sinais_com_peso_comercial(sinais_ativos)
     if not sinais_ativos:
         return {
             "facts": [],
@@ -264,6 +317,176 @@ def recommend_next_action(
     if timing_score < 20:
         return "Monitorar -- sem motivo objetivo para abordagem imediata."
     return "Baixa prioridade -- manter na base e reavaliar no próximo ciclo."
+
+
+_CATEGORIA_POR_SINAL = {
+    _sinais.OBRA_ATIVA: "expansao_fisica",
+    _sinais.NEW_BRANCH: "expansao_fisica",
+    _sinais.MULTI_UNIT: "expansao_fisica",
+    _sinais.ADDRESS_CHANGE: "expansao_fisica",
+    _sinais.COMPANY_EXPANSION: "expansao_fisica",
+    _sinais.CAPITAL_INCREASE: "investimento",
+    _sinais.CORE_ACTIVITY_CHANGE: "mudanca_atividade",
+    _sinais.NEW_CNAE: "mudanca_atividade",
+}
+
+# (categoria do gatilho, segmento ICP) -> (serviço específico, motivo em
+# linguagem de negócio). O serviço sempre vem da própria lista de
+# ``servicos_recomendados`` do segmento (crm_strategy.PERFIS_ICP) -- isto só
+# decide QUAL item da lista puxar pra frente e POR QUÊ, a partir do gatilho
+# que disparou agora. Nunca inventa um serviço fora do que o ICP já prevê.
+_SERVICO_POR_CATEGORIA_E_SEGMENTO: dict[tuple[str, str], tuple[str, str]] = {
+    ("expansao_fisica", "Galpões Logísticos & Indústrias"): (
+        "CFTV perimetral e cabeamento estruturado",
+        "obra ou nova unidade detectada -- ainda não tem nenhuma infraestrutura de "
+        "segurança ou rede instalada. Janela ideal pra orçar antes do acabamento.",
+    ),
+    ("expansao_fisica", "Escritórios Corporativos & Serviços"): (
+        "Organização de racks e servidores",
+        "nova filial ou endereço detectado -- unidade nova normalmente começa sem "
+        "infraestrutura de TI pronta.",
+    ),
+    ("expansao_fisica", "Clínicas, Hospitais & Laboratórios"): (
+        "CFTV em áreas comuns e recepção",
+        "nova unidade de atendimento detectada -- precisa de segurança na recepção "
+        "desde o primeiro dia de funcionamento.",
+    ),
+    ("expansao_fisica", "Comércios & Redes de Varejo"): (
+        "Infraestrutura elétrica e de TI",
+        "nova loja/unidade detectada -- costuma abrir rápido e sem planejamento "
+        "prévio de rede e elétrica.",
+    ),
+    ("investimento", "Galpões Logísticos & Indústrias"): (
+        "Wi-Fi industrial e controle de acesso",
+        "aumento de capital social -- indica investimento na operação, bom momento "
+        "pra propor upgrade de conectividade e controle de acesso.",
+    ),
+    ("investimento", "Escritórios Corporativos & Serviços"): (
+        "Firewall e segurança de dados",
+        "aumento de capital social -- empresa em crescimento tende a lidar com mais "
+        "dados sensíveis, reforçar segurança é natural agora.",
+    ),
+    ("investimento", "Clínicas, Hospitais & Laboratórios"): (
+        "Redundância de rede",
+        "aumento de capital social -- sugere expansão de atendimento; rede não pode "
+        "cair numa unidade de saúde.",
+    ),
+    ("investimento", "Comércios & Redes de Varejo"): (
+        "Estabilidade de rede para PDVs e caixas",
+        "aumento de capital social -- crescimento financeiro costuma vir acompanhado "
+        "de mais pontos de venda.",
+    ),
+    ("reativacao", "Galpões Logísticos & Indústrias"): (
+        "Obras técnicas e CFTV perimetral",
+        "empresa reativada na Receita -- infraestrutura de segurança pode estar "
+        "desligada ou desatualizada depois do período parado.",
+    ),
+    ("reativacao", "Escritórios Corporativos & Serviços"): (
+        "Contrato mensal de suporte de TI",
+        "empresa reativada na Receita -- reabertura é o momento certo pra colocar "
+        "suporte de TI recorrente em dia.",
+    ),
+    ("reativacao", "Clínicas, Hospitais & Laboratórios"): (
+        "Nobreaks",
+        "empresa reativada na Receita -- reabrir uma unidade de saúde exige garantir "
+        "energia contínua antes de voltar a atender.",
+    ),
+    ("reativacao", "Comércios & Redes de Varejo"): (
+        "CFTV contra perdas",
+        "empresa reativada na Receita -- reabertura de loja é ponto de atenção pra "
+        "perdas e furtos.",
+    ),
+    ("mudanca_atividade", "Galpões Logísticos & Indústrias"): (
+        "Cabeamento estruturado",
+        "mudança de CNAE/atividade -- operação nova ou diferente costuma exigir "
+        "infraestrutura de rede refeita.",
+    ),
+    ("mudanca_atividade", "Escritórios Corporativos & Serviços"): (
+        "Segurança de dados",
+        "mudança de CNAE/atividade -- ramo novo pode trazer exigência de "
+        "compliance ainda não coberta.",
+    ),
+    ("mudanca_atividade", "Clínicas, Hospitais & Laboratórios"): (
+        "Conformidade com LGPD",
+        "mudança de CNAE/atividade -- ramo novo em saúde costuma vir com dado "
+        "sensível de paciente, LGPD entra em pauta.",
+    ),
+    ("mudanca_atividade", "Comércios & Redes de Varejo"): (
+        "CFTV contra perdas",
+        "mudança de CNAE/atividade -- operação nova ainda não tem cobertura de "
+        "segurança avaliada.",
+    ),
+}
+
+
+def _categoria_do_sinal(sinal: dict[str, Any]) -> str | None:
+    tipo = sinal.get("signal_type")
+    if tipo == _sinais.REGISTRY_STATUS_CHANGE:
+        if "Reativação" in str(sinal.get("title") or ""):
+            return "reativacao"
+        # Baixa/inaptidão ou mudança neutra: categoria própria (não None) --
+        # precisa ser escolhida como "sinal relevante" quando for a mais
+        # recente, mas tratada como "não vender" por recommend_service.
+        return "baixa"
+    return _CATEGORIA_POR_SINAL.get(tipo)
+
+
+def recommend_service(segmento_icp: str, sinais_ativos: list[dict[str, Any]]) -> dict[str, str] | None:
+    """'Dado o que aconteceu, qual serviço específico oferecer e por quê?'
+
+    Cruza o segmento ICP com a categoria do sinal comercial mais recente --
+    nunca inventa um serviço fora da lista já definida pra aquele segmento em
+    crm_strategy.PERFIS_ICP, só decide qual item puxar pra frente. Devolve
+    None quando não há segmento classificado, sinal ativo, ou quando o sinal
+    relevante mais recente é uma baixa/inaptidão (não é hora de vender, é
+    hora de despriorizar).
+
+    "Mais recente" aqui significa o mais recente ENTRE OS SINAIS COM
+    CATEGORIA COMERCIAL RECONHECIDA -- não o mais recente cru por
+    detected_at. O worker de inteligência (refresh_company_intelligence)
+    gera automaticamente um sinal NEW_COMPANY ("Empresa adicionada à base")
+    na primeira vez que processa qualquer lead novo, e ele quase sempre
+    carimba um timestamp alguns segundos depois do sinal de negócio que deu
+    origem ao lead (Fase 1/2/3) -- sem essa distinção, esse ruído
+    administrativo mascararia a recomendação específica com o fallback
+    genérico em praticamente todo lead recém-criado."""
+    perfil = PERFIS_ICP.get(segmento_icp)
+    if not perfil or not sinais_ativos:
+        return None
+
+    ordenados = sorted(sinais_ativos, key=lambda s: s.get("detected_at") or "", reverse=True)
+    servicos_do_segmento = perfil["servicos_recomendados"]
+    assert isinstance(servicos_do_segmento, tuple)
+
+    sinal_relevante = next((s for s in ordenados if _categoria_do_sinal(s) is not None), None)
+    if sinal_relevante is None:
+        # Nenhum sinal ativo carrega categoria comercial reconhecida (ex.:
+        # só crescimento de avaliações, site novo) -- recomendação genérica
+        # com o primeiro item da lista do ICP, mas ainda referenciando o
+        # sinal mais recente de todos para contexto.
+        return {
+            "servico": servicos_do_segmento[0] if servicos_do_segmento else "",
+            "motivo": "Sinal comercial recente detectado -- avalie o pacote padrão do segmento.",
+            "sinal_base": ordenados[0].get("signal_type"),
+        }
+
+    categoria = _categoria_do_sinal(sinal_relevante)
+    tipo_sinal = sinal_relevante.get("signal_type")
+    if categoria == "baixa":
+        return None
+
+    par = _SERVICO_POR_CATEGORIA_E_SEGMENTO.get((categoria, segmento_icp))
+    if par:
+        servico, motivo = par
+        return {"servico": servico, "motivo": motivo.capitalize(), "sinal_base": tipo_sinal}
+
+    # Categoria mapeada mas sem combinação específica para este segmento:
+    # recomendação genérica com o primeiro item da lista do ICP.
+    return {
+        "servico": servicos_do_segmento[0] if servicos_do_segmento else "",
+        "motivo": "Sinal comercial recente detectado -- avalie o pacote padrão do segmento.",
+        "sinal_base": tipo_sinal,
+    }
 
 
 def _pontuacao_anterior(lead_id: int) -> dict[str, Any] | None:
@@ -473,6 +696,76 @@ def conversion_rate_by_score_range() -> list[dict[str, Any]]:
             }
         )
     return resultado
+
+
+def formatar_moeda_brl(valor: Any) -> str | None:
+    """Formata um número como R$ no padrão brasileiro sem depender de locale
+    do sistema operacional (que varia entre máquina de dev e produção)."""
+    if valor is None:
+        return None
+    try:
+        numero = float(valor)
+    except (TypeError, ValueError):
+        return None
+    inteiro, _, decimal = f"{numero:,.2f}".partition(".")
+    inteiro = inteiro.replace(",", ".")
+    return f"R$ {inteiro},{decimal}"
+
+
+def _lista_json(bruto: Any) -> list[Any]:
+    """Desserializa um campo *_json do snapshot (cnaes_secundarios_json,
+    socios_json) -- nunca quebra em dado malformado, só devolve vazio."""
+    if not bruto:
+        return []
+    if isinstance(bruto, list):
+        return bruto
+    try:
+        valor = json.loads(bruto)
+    except (TypeError, ValueError):
+        return []
+    return valor if isinstance(valor, list) else []
+
+
+def montar_perfil_empresa(lead_id: int) -> dict[str, Any]:
+    """Consolida, num único dicionário, tudo que o CRM já sabe sobre a
+    empresa antes do vendedor abordar -- hoje espalhado em colunas de
+    company_snapshots que nunca chegam à tela (capital social, porte, CNAE,
+    situação cadastral, sócios reais). Função pura de leitura: não decide
+    nada, só junta o que já foi coletado (Receita, via automation.py)."""
+    with conectar() as conexao:
+        linha = conexao.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
+    if not linha:
+        raise ValueError(f"Lead {lead_id} não encontrado.")
+    lead = dict(linha)
+    snapshots = listar_snapshots(lead_id, limite=1)
+    ultimo = snapshots[0] if snapshots else {}
+
+    capital_social = ultimo.get("capital_social")
+    return {
+        "lead_id": lead_id,
+        "place_id": lead.get("place_id"),
+        "nome_fantasia": lead.get("nome_empresa"),
+        "razao_social": lead.get("razao_social") or ultimo.get("company_name"),
+        "cnpj": lead.get("cnpj"),
+        "endereco": lead.get("endereco") or ultimo.get("address"),
+        "cidade": lead.get("cidade"),
+        "telefone": lead.get("telefone"),
+        "email": lead.get("email"),
+        "site": lead.get("site"),
+        "porte": ultimo.get("porte"),
+        "capital_social": capital_social,
+        "capital_social_formatado": formatar_moeda_brl(capital_social),
+        "cnae_principal": ultimo.get("cnae_principal"),
+        "cnaes_secundarios": _lista_json(ultimo.get("cnaes_secundarios_json")),
+        "situacao_cadastral": ultimo.get("situacao_cadastral"),
+        "data_situacao_cadastral": ultimo.get("data_situacao_cadastral"),
+        "natureza_juridica": ultimo.get("natureza_juridica"),
+        "socios": _lista_json(ultimo.get("socios_json")),
+        "dados_atualizados_em": ultimo.get("captured_at"),
+        "tem_dados_receita": bool(
+            ultimo.get("porte") or capital_social or ultimo.get("cnae_principal")
+        ),
+    }
 
 
 def build_company_features(lead_id: int) -> dict[str, Any]:

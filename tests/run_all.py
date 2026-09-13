@@ -22,6 +22,15 @@ ARQUIVOS_DE_TESTE = [
     "tests.test_app_smoke",
     "tests.test_app_actions",
     "tests.test_opportunity_engine",
+    "tests.test_receita_snapshot",
+    "tests.test_receita_dump",
+    "tests.test_receita_ingest",
+    "tests.test_obras_dump",
+    "tests.test_obras_match",
+    "tests.test_obras_ingest",
+    "tests.test_obras_sp",
+    "tests.test_cnes_dump",
+    "tests.test_cnes_ingest",
 ]
 
 

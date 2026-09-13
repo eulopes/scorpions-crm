@@ -31,8 +31,14 @@ class AppSmokeTest(unittest.TestCase):
             database = Path(temp_dir) / "smoke.db"
             test_env = {
                 "CRM_DB_PATH": str(database),
+                "OBRAS_DUMP_DB": str(Path(temp_dir) / "obras_smoke.duckdb"),
                 "SCORPIONS_DISABLE_WORKER": "1",
                 "AUTH_USERS_JSON": json.dumps({"teste": password_hash}),
+                # Só para configurar_google_places() retornar True e o botão
+                # "Consultar avaliações no Google" aparecer no perfil da
+                # empresa -- o teste nunca clica nele, então nenhuma chamada
+                # de rede de verdade acontece com esta chave falsa.
+                "GOOGLE_PLACES_API_KEY": "chave-de-teste-fake",
             }
             with patch.dict(os.environ, test_env, clear=False):
                 app = AppTest.from_file(str(ROOT / "app.py"), default_timeout=30)
@@ -76,15 +82,33 @@ class AppSmokeTest(unittest.TestCase):
                             self.assertGreaterEqual(len(app.dataframe), 1)
                             detalhe = app.selectbox(key="radar_detalhe_selecionado")
                             self.assertGreaterEqual(len(detalhe.options), 1)
-                            self.assertIn("Why this company", rendered_markdown)
-                            self.assertIn("Why now", rendered_markdown)
+                            self.assertIn("Por que essa empresa", rendered_markdown)
+                            self.assertIn("Por que agora", rendered_markdown)
                             self.assertIn("Próxima melhor ação", rendered_markdown)
+                            # Perfil consolidado da empresa (Receita) -- seedado
+                            # com um company_snapshot em _seed_scored_lead. O
+                            # título do expander não é capturado por
+                            # app.markdown (é o rótulo do próprio widget), por
+                            # isso a verificação é sobre o conteúdo dentro dele.
+                            self.assertIn("MICRO EMPRESA", rendered_markdown)
+                            self.assertIn("R$ 50.000,00", rendered_markdown)
+                            self.assertIn("FULANA DE TAL", rendered_markdown)
+                            # Enriquecimento sob demanda (Google Places): o
+                            # lead tem um place_id "de verdade" (sem prefixo)
+                            # e a chave está configurada -- o botão deve
+                            # aparecer. O teste nunca clica nele (sem chamada
+                            # de rede real).
+                            botoes_google = [
+                                b for b in app.button
+                                if "Consultar avaliações no Google" in (b.label or "")
+                            ]
+                            self.assertEqual(len(botoes_google), 1)
 
     @staticmethod
     def _seed_scored_lead(database: Path) -> None:
         now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         with sqlite3.connect(database) as connection:
-            connection.execute(
+            lead_id = connection.execute(
                 """
                 INSERT INTO leads (
                     place_id, nome_empresa, nicho, cidade, telefone, email, site, cnpj,
@@ -96,7 +120,10 @@ class AppSmokeTest(unittest.TestCase):
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    "smoke:radar", "Empresa Radar Teste", "Transportadora", "Campinas, SP",
+                    # Sem prefixo (":") de propósito -- simula um place_id
+                    # real do Google Places, para exercitar o botão
+                    # "Consultar avaliações no Google" no perfil da empresa.
+                    "ChIJRadarTesteSemPrefixo123", "Empresa Radar Teste", "Transportadora", "Campinas, SP",
                     "(11) 90000-0000", "radar@example.com", "https://radar.example.com", "11222333000181",
                     "Novos Leads", "Teste isolado", "Galpões Logísticos & Indústrias", "CFTV perimetral",
                     "ATIVA",
@@ -105,32 +132,24 @@ class AppSmokeTest(unittest.TestCase):
                     "Priorizar abordagem comercial nos próximos dias.",
                     now, 12, now, now, now,
                 ),
-            )
-
-    @staticmethod
-    def _seed_scored_lead(database: Path) -> None:
-        now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-        with sqlite3.connect(database) as connection:
+            ).lastrowid
+            # Cobre o painel "Perfil da empresa (Receita)" -- dados que
+            # company_history.create_company_snapshot já grava, mas que só
+            # aparecem em tela a partir de montar_perfil_empresa().
             connection.execute(
                 """
-                INSERT INTO leads (
-                    place_id, nome_empresa, nicho, cidade, telefone, email, site, cnpj,
-                    status, origem, segmento_icp, servicos_recomendados, status_receita,
-                    fit_score, intent_score, timing_score, data_confidence_score,
-                    opportunity_score, opportunity_level, opportunity_reason, why_now,
-                    opportunity_updated_at, opportunity_delta, last_signal_at,
-                    criado_em, atualizado_em
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO company_snapshots (
+                    lead_id, source, captured_at, data_hash, porte, capital_social,
+                    cnae_principal, situacao_cadastral, data_situacao_cadastral,
+                    natureza_juridica, qsa_hash, qtde_socios, socios_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    "smoke:radar", "Empresa Radar Teste", "Transportadora", "Campinas, SP",
-                    "(11) 90000-0000", "radar@example.com", "https://radar.example.com", "11222333000181",
-                    "Novos Leads", "Teste isolado", "Galpões Logísticos & Indústrias", "CFTV perimetral",
-                    "ATIVA",
-                    90, 85, 80, 95,
-                    88, "Alta", "Esta empresa apresenta características fortemente compatíveis com o perfil.",
-                    "Priorizar abordagem comercial nos próximos dias.",
-                    now, 12, now, now, now,
+                    lead_id, "Receita Federal (BrasilAPI)", now, "hash-teste",
+                    "MICRO EMPRESA", 50000.0,
+                    "5211-7/01 · Transporte rodoviário de carga", "ATIVA", "2020-01-01",
+                    "206-2 - Sociedade Empresária Limitada", "hash-qsa", 1,
+                    json.dumps([{"nome": "FULANA DE TAL", "qualificacao": "49 - Sócio-Administrador"}]),
                 ),
             )
 

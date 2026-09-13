@@ -75,6 +75,7 @@ class AcoesReaisTest(unittest.TestCase):
 
         test_env = {
             "CRM_DB_PATH": str(self.database),
+            "OBRAS_DUMP_DB": str(Path(self._tmp.name) / "obras_acoes.duckdb"),
             "SCORPIONS_DISABLE_WORKER": "1",
             "AUTH_USERS_JSON": "{}",
         }
@@ -154,6 +155,38 @@ class AcoesReaisTest(unittest.TestCase):
                 ).fetchone()[0]
             self.assertEqual("Contato / Qualificação", status)
 
+        with self.subTest(acao="busca em Empresas nao volta ao valor do Abrir depois de limpa"):
+            # Bug real de QA: o botao "Abrir" do Pipeline pre-preenche a busca
+            # de Empresas via session_state["busca_empresas"], mas nada
+            # escrevia de volta o valor editado manualmente pelo usuario ali
+            # -- entao, ao trocar de pagina e voltar (o widget "renasce"), o
+            # campo voltava para o valor antigo do "Abrir" em vez de ficar
+            # vazio como o usuario tinha deixado.
+            at.button(key=f"abrir_{self.lead_mover_id}").click()
+            at.run(timeout=30)
+            self.assertEqual([], list(at.exception))
+            self.assertEqual("Empresas", at.radio(key="navegacao_principal").value)
+
+            campo_busca = next(w for w in at.text_input if w.key.startswith("busca_empresas_"))
+            self.assertEqual("Empresa Para Mover", campo_busca.value)
+
+            campo_busca.set_value("")
+            at.run(timeout=30)
+            self.assertEqual([], list(at.exception))
+
+            at.radio(key="navegacao_principal").set_value("Visão geral")
+            at.run(timeout=30)
+            at.radio(key="navegacao_principal").set_value("Empresas")
+            at.run(timeout=30)
+            self.assertEqual([], list(at.exception))
+
+            campo_busca_depois = next(w for w in at.text_input if w.key.startswith("busca_empresas_"))
+            self.assertEqual("", campo_busca_depois.value, "busca voltou ao valor antigo do botao Abrir")
+
+            # Volta pro estado que os proximos subTests esperam (pagina Pipeline).
+            at.radio(key="navegacao_principal").set_value("Pipeline")
+            at.run(timeout=30)
+
         with self.subTest(acao="descartar lead exige motivo"):
             at.selectbox(key=f"move_{self.lead_mover_id}_0").set_value("Descartado")
             at.run(timeout=30)
@@ -187,7 +220,7 @@ class AcoesReaisTest(unittest.TestCase):
             at.run(timeout=30)
             self.assertEqual([], list(at.exception))
 
-            at.button(key="abrir_confirmacao_exclusao").click()
+            at.button(key="danger_abrir_confirmacao_exclusao").click()
             at.run(timeout=30)
             self.assertEqual([], list(at.exception))
 
@@ -202,12 +235,22 @@ class AcoesReaisTest(unittest.TestCase):
                 ).fetchone()[0]
             self.assertEqual(0, total, "lead nao foi removido do banco apos a confirmacao")
 
+        with self.subTest(acao="filtrar por status em Empresas nao quebra a pagina"):
+            # Bug real de QA: "usuarios" tambem tem uma coluna "status", e o
+            # LEFT JOIN com "usuarios" tornava "status" ambiguo pro SQLite
+            # sempre que o filtro "Filtrar status" era usado (qualquer valor
+            # diferente de "Todos") -- quebrava a tela inteira com
+            # "ambiguous column name: status".
+            at.selectbox(key="filtro_status_empresas").set_value("Descartado")
+            at.run(timeout=30)
+            self.assertEqual([], list(at.exception))
+
         with self.subTest(acao="ativar/desativar usuario"):
             at.radio(key="navegacao_principal").set_value("Equipe")
             at.run(timeout=30)
             self.assertEqual([], list(at.exception))
 
-            at.button(key=f"toggle_usuario_{self.vendedor_id}").click()
+            at.button(key=f"danger_toggle_usuario_{self.vendedor_id}").click()
             at.run(timeout=30)
             self.assertEqual([], list(at.exception))
 

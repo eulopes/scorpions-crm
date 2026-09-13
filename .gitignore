@@ -2,6 +2,7 @@
 .venv/
 .venv-1/
 .venv-2/
+.venv-3/
 __pycache__/
 *.pyc
 
@@ -16,6 +17,22 @@ __pycache__/
 *.db
 *.db-journal
 scorpions_base_legacy_backup.db
+
+# Dump da Receita (Fase 1) -- DuckDB e cache dos ~15 GB mensais
+*.duckdb
+*.duckdb.wal
+.receita_cache/
+.cnes_cache/
+
+# Arquivos externos baixados p/ analise (alvaras SP, samples de dados publicos)
+dados_externos/
+
+# Exports/dumps com dados reais de leads e empresas (LGPD) -- não versionar
+leads_cnes_sp.csv
+alvaras.geojson
+alvaras.gpkg
+alvaras.parquet
+alvaras/
 
 # Logs
 *.log

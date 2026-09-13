@@ -86,21 +86,26 @@ from automation import (
     status_worker,
     ler_config,
     salvar_config,
-    telefone_suprimido,
+    listar_telefones_suprimidos,
     adicionar_supressao,
     remover_supressao,
     listar_supressao,
     registrar_mensagem_enviada,
     leads_ja_contatados_ha_dias,
     gerar_link_whatsapp,
+    _normalizar_telefone,
 )
 from opportunity_engine import (
     NIVEIS_OPORTUNIDADE,
     conversion_rate_by_score_range,
     get_opportunity_timeline,
+    montar_perfil_empresa,
     recommend_next_action,
+    recommend_service,
     sincronizar_outcomes_pendentes,
+    _nivel_por_pontuacao,
 )
+import obras_dump
 from sales_signals import listar_signals_ativos
 
 
@@ -244,6 +249,42 @@ def carregar_tema_css() -> str:
     """Lê theme.css uma única vez por processo. Editar esse arquivo e reiniciar
     o Streamlit (ou limpar o cache) já reflete no visual, sem tocar em app.py."""
     return (APP_DIR / "theme.css").read_text(encoding="utf-8")
+
+
+# Mesma escala de NIVEIS_OPORTUNIDADE (opportunity_engine) aplicada à cor --
+# reaproveita as variáveis já definidas em theme.css (nunca hex solto aqui).
+# Crítica/Alta usam --danger/--warning não porque sejam "ruins": é para
+# chamar atenção de que aquela oportunidade pede ação imediata.
+_COR_POR_NIVEL_OPORTUNIDADE = {
+    "Crítica": "var(--danger)",
+    "Alta": "var(--warning)",
+    "Boa": "var(--success)",
+    "Moderada": "var(--primary)",
+    "Baixa": "var(--weak)",
+}
+
+
+def cor_por_nivel(nivel: str) -> str:
+    return _COR_POR_NIVEL_OPORTUNIDADE.get(nivel, "var(--text)")
+
+
+def cor_por_pontuacao(pontuacao: int) -> str:
+    """Mesmo critério de cor_por_nivel, mas a partir de um score bruto (0-100)
+    -- usado nos componentes individuais (Fit/Intent/Timing/Confiança), que
+    não vêm com um "nível" próprio calculado."""
+    return cor_por_nivel(_nivel_por_pontuacao(int(pontuacao)))
+
+
+def formatar_delta_score(delta: int | float | None) -> str:
+    """Delta do Opportunity Score com seta e cor -- mesma notação "▼2" que
+    o card de oportunidade do Dashboard já usa, agora também na tabela/painel
+    do Radar."""
+    valor = int(delta or 0)
+    if valor > 0:
+        return f'<span style="color:var(--success)">▲ +{valor}</span>'
+    if valor < 0:
+        return f'<span style="color:var(--danger)">▼ {valor}</span>'
+    return '<span style="color:var(--weak)">— 0</span>'
 
 
 @st.cache_resource
@@ -962,6 +1003,97 @@ def formatar_cnpj(cnpj: str) -> str:
     return f"{numero[:2]}.{numero[2:5]}.{numero[5:8]}/{numero[8:12]}-{numero[12:]}"
 
 
+def _fmt_data_radar(valor: Any) -> str:
+    if not valor:
+        return "—"
+    convertido = pd.to_datetime(valor, errors="coerce", utc=True)
+    return convertido.strftime("%d/%m/%Y %H:%M") if pd.notna(convertido) else str(valor)
+
+
+def render_perfil_empresa_receita(lead_id: int) -> None:
+    """Perfil consolidado da empresa (porte, capital social, CNAE, situação
+    cadastral, sócios reais) -- dados que a coleta automática da Receita já
+    guarda em company_snapshots mas nunca apareciam em tela nenhuma antes de
+    o vendedor abordar. Reutilizado no Radar e em Clientes/Empresas."""
+    perfil = montar_perfil_empresa(lead_id)
+    if not perfil.get("tem_dados_receita"):
+        st.caption(
+            "Ainda não enriquecido com dados da Receita Federal (porte, capital social, "
+            "CNAE, quadro societário). Isso acontece automaticamente em segundo plano "
+            "para leads com CNPJ válido."
+        )
+        return
+
+    situacao = str(perfil.get("situacao_cadastral") or "não informada")
+    if perfil.get("data_situacao_cadastral"):
+        situacao += f" (desde {escape(str(perfil['data_situacao_cadastral']))})"
+
+    campos_perfil = [
+        ("Porte", perfil.get("porte") or "não informado"),
+        ("Capital social", perfil.get("capital_social_formatado") or "não informado"),
+        ("Natureza jurídica", perfil.get("natureza_juridica") or "não informada"),
+        ("Situação cadastral", situacao),
+        ("CNAE principal", perfil.get("cnae_principal") or "não informado"),
+    ]
+    cols_perfil = st.columns(2)
+    for indice, (rotulo, valor) in enumerate(campos_perfil):
+        with cols_perfil[indice % 2]:
+            st.markdown(
+                f'<div class="detail-item"><div class="detail-label">{escape(rotulo)}</div>'
+                f'<div class="detail-value">{escape(str(valor))}</div></div>',
+                unsafe_allow_html=True,
+            )
+
+    if perfil.get("cnaes_secundarios"):
+        st.markdown(
+            '<div class="detail-item"><div class="detail-label">CNAEs secundários</div>'
+            f'<div class="detail-value">{escape("; ".join(perfil["cnaes_secundarios"]))}</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    if perfil.get("socios"):
+        descricao_socios = "; ".join(
+            escape(str(socio.get("nome") or ""))
+            + (f" ({escape(str(socio['qualificacao']))})" if socio.get("qualificacao") else "")
+            for socio in perfil["socios"]
+        )
+        st.markdown(
+            '<div class="detail-item"><div class="detail-label">Quadro societário</div>'
+            f'<div class="detail-value">{descricao_socios}</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    if perfil.get("dados_atualizados_em"):
+        st.caption(f"Dados da Receita atualizados em {_fmt_data_radar(perfil['dados_atualizados_em'])}.")
+
+    place_id_google = _place_id_do_google(perfil.get("place_id"))
+    if place_id_google and configurar_google_places():
+        chave_estado = f"google_detalhes_{lead_id}"
+        if st.button(
+            "Consultar avaliações no Google", key=f"consultar_google_{lead_id}",
+            icon=":material/travel_explore:",
+        ):
+            st.session_state[chave_estado] = buscar_detalhes_google_place(place_id_google) or {}
+        if chave_estado in st.session_state:
+            detalhes_google = st.session_state[chave_estado]
+            partes = []
+            if detalhes_google.get("rating") is not None:
+                texto = f"{detalhes_google['rating']:.1f} ★"
+                if detalhes_google.get("reviews_count") is not None:
+                    texto += f" ({detalhes_google['reviews_count']} avaliações)"
+                partes.append(texto)
+            if detalhes_google.get("aberto_agora") is not None:
+                partes.append("aberto agora" if detalhes_google["aberto_agora"] else "fechado no momento")
+            if detalhes_google.get("website"):
+                partes.append(f"[site]({detalhes_google['website']})")
+            if detalhes_google.get("maps_url"):
+                partes.append(f"[Google Maps]({detalhes_google['maps_url']})")
+            if partes:
+                st.markdown(" · ".join(partes))
+            else:
+                st.caption("O Google não retornou avaliações, site ou horário para esta empresa.")
+
+
 def _juntar_endereco(dados: dict[str, Any]) -> str:
     logradouro = str(dados.get("logradouro") or "").strip()
     numero = str(dados.get("numero") or "").strip()
@@ -1243,6 +1375,58 @@ def buscar_google_places(nicho: str, localizacao: str, limite: int) -> list[dict
     return leads
 
 
+GOOGLE_PLACE_DETAILS_URL = "https://places.googleapis.com/v1/places/{place_id}"
+
+
+def _place_id_do_google(lead_place_id: str | None) -> str | None:
+    """Só os IDs vindos de verdade da busca do Google Places (sem prefixo
+    tipo "bacen:", "receita:", "cnes:", "cvm:", "b3:", "demo:" usado pelas
+    outras fontes) -- nunca refazemos uma busca por nome para "adivinhar" o
+    place certo: mostrar avaliação/site de uma empresa errada é pior do que
+    não mostrar nada."""
+    valor = str(lead_place_id or "").strip()
+    if not valor or ":" in valor:
+        return None
+    return valor
+
+
+@st.cache_data(ttl=60 * 60 * 24, show_spinner=False)
+def buscar_detalhes_google_place(place_id: str) -> dict[str, Any] | None:
+    """Enriquecimento SOB DEMANDA (só quando o vendedor pede) com rating,
+    quantidade de avaliações e site via Google Places Details -- ao
+    contrário da prospecção em massa, uma consulta isolada por clique tem
+    custo desprezível e não precisa de paginação. Cacheado por 24h: reabrir
+    o mesmo perfil no mesmo dia não gasta cota de novo."""
+    chave = os.getenv("GOOGLE_PLACES_API_KEY", "").strip()
+    if not chave:
+        return None
+    headers = {
+        "X-Goog-Api-Key": chave,
+        "X-Goog-FieldMask": "rating,userRatingCount,websiteUri,googleMapsUri,currentOpeningHours.openNow",
+    }
+    try:
+        resposta = requests.get(
+            GOOGLE_PLACE_DETAILS_URL.format(place_id=place_id), headers=headers, timeout=15
+        )
+    except requests.RequestException:
+        return None
+    if not resposta.ok:
+        return None
+    try:
+        dados = resposta.json()
+    except ValueError:
+        return None
+    if not isinstance(dados, dict):
+        return None
+    return {
+        "rating": dados.get("rating"),
+        "reviews_count": dados.get("userRatingCount"),
+        "website": dados.get("websiteUri"),
+        "maps_url": dados.get("googleMapsUri"),
+        "aberto_agora": (dados.get("currentOpeningHours") or {}).get("openNow"),
+    }
+
+
 def gerar_demonstracao(nicho: str, localizacao: str, limite: int) -> list[dict[str, Any]]:
     sufixos = ["Prime", "Central", "Horizonte", "Conecta", "Ideal", "Mais", "Nova", "Ponto"]
     return [
@@ -1304,18 +1488,27 @@ def listar_leads(
         )
         parametros.append(equipe_id)
     if busca:
-        sql += " AND (nome_empresa LIKE ? OR razao_social LIKE ? OR cnpj LIKE ? OR cidade LIKE ? OR endereco LIKE ?)"
+        sql += (
+            " AND (leads.nome_empresa LIKE ? OR leads.razao_social LIKE ? OR leads.cnpj LIKE ? "
+            "OR leads.cidade LIKE ? OR leads.endereco LIKE ?)"
+        )
         termo = f"%{busca}%"
         digitos_busca = limpar_cnpj(busca)
         termo_cnpj = f"%{digitos_busca}%" if digitos_busca else termo
         parametros.extend([termo, termo, termo_cnpj, termo, termo])
     if nicho != "Todos":
-        sql += " AND nicho = ?"
+        sql += " AND leads.nicho = ?"
         parametros.append(nicho)
     if status != "Todos":
-        sql += " AND status = ?"
+        # Qualificado com "leads." -- usuarios TAMBÉM tem uma coluna "status"
+        # (ativo/inativo do usuário), e o LEFT JOIN torna "status" sozinho
+        # ambíguo pro SQLite, que recusa a query inteira em vez de adivinhar
+        # (ambiguous column name: status). Bug real encontrado em QA: toda
+        # tentativa de filtrar Clientes/Empresas por etapa do funil quebrava
+        # a tela inteira com o traceback do Python.
+        sql += " AND leads.status = ?"
         parametros.append(status)
-    sql += " ORDER BY atualizado_em DESC"
+    sql += " ORDER BY leads.atualizado_em DESC"
     with conectar() as conexao:
         return pd.read_sql_query(sql, conexao, params=parametros)
 
@@ -1363,6 +1556,16 @@ def _valor_para_str_canonico(valor: Any, tipo: str = "str") -> str:
         except (ValueError, TypeError):
             return str(valor)
     return str(valor).strip()
+
+
+def _neutralizar_formula_csv(valor: Any) -> Any:
+    """Evita injeção de fórmula ao abrir o CSV exportado no Excel/Sheets: um
+    campo de texto livre (nome da empresa, observações...) que comece com
+    =, +, - ou @ seria interpretado como fórmula/DDE pela planilha. O apóstrofo
+    na frente faz essas ferramentas tratarem o valor como texto puro."""
+    if isinstance(valor, str) and valor[:1] in ("=", "+", "-", "@"):
+        return "'" + valor
+    return valor
 
 
 def atualizar_leads(editado: pd.DataFrame, original: pd.DataFrame) -> int:
@@ -1507,6 +1710,11 @@ MOTIVOS_DESCARTE = (
     "Não é decisor", "Sem retorno", "Fora do escopo", "Outro",
 )
 LIMITE_DIAS_VISTORIA_LENTA = 3
+# Cards renderizados por coluna do Kanban -- sem isso, uma etapa com muitos
+# milhares de leads (ex.: "Novos Leads" após uma carga em massa do CNES)
+# tentaria montar um card HTML por lead de uma vez, travando o navegador.
+# Sempre os de maior pontuação primeiro (mais relevantes ficam visíveis).
+LIMITE_CARDS_KANBAN_POR_ETAPA = 50
 
 
 def atualizar_etapa_funil(lead_id: int, nova_etapa: str, motivo_descarte: str | None = None):
@@ -1632,9 +1840,9 @@ def _render_kanban_card(lead: pd.Series, etapa_atual: str) -> None:
         # meio do <div>, e o restante passa a ser exibido como texto cru.
         st.markdown(
             f"""
-            <div class="kanban-card">
+            <div class="kanban-card {score_classe}">
               <div class="kanban-topline">
-                <div class="kanban-company">{escape(str(lead['nome_empresa']))}</div>
+                <div class="kanban-company" title="{escape(str(lead['nome_empresa']))}">{escape(str(lead['nome_empresa']))}</div>
                 <div class="score-badge {score_classe}">{score_str}</div>
               </div>
               <div class="kanban-location">{escape(cidade)} · {escape(nicho)}</div>
@@ -1963,11 +2171,16 @@ if aba_dashboard:
 
     st.markdown(
         """
+        <div class="kpi-hero">
+          <span class="label">Valor em pipeline</span>
+          <strong>R$ {:,.0f}</strong>
+          <span class="note">negócios em etapas ativas</span>
+        </div>
         <div class="sales-summary">
-          <div class="sales-summary__item accent">
-            <span class="label">Leads</span>
+          <div class="sales-summary__item">
+            <span class="label">Leads na base</span>
             <strong>{}</strong>
-            <span class="note" style="color:#7DD3FC">+{} este mês</span>
+            <span class="note">+{} este mês</span>
           </div>
           <div class="sales-summary__item">
             <span class="label">Novos</span>
@@ -1982,22 +2195,18 @@ if aba_dashboard:
           <div class="sales-summary__item">
             <span class="label">Propostas</span>
             <strong>{}</strong>
-            <span class="note" style="color:#7DD3FC">R$ {:,.0f} em jogo</span>
+            <span class="note">R$ {:,.0f} em jogo</span>
           </div>
           <div class="sales-summary__item">
             <span class="label">Conversão</span>
             <strong>{:.1f}%</strong>
             <span class="note">{} fechado(s)</span>
           </div>
-          <div class="sales-summary__item accent">
-            <span class="label">Valor em pipeline</span>
-            <strong>R$ {:,.0f}</strong>
-            <span class="note">negócios em etapas ativas</span>
-          </div>
         </div>
         """.format(
+            valor_pipeline,
             total, novos_no_mes, novos, em_andamento, propostas, propostas, valor_propostas,
-            conversao, fechados, valor_pipeline,
+            conversao, fechados,
         ),
         unsafe_allow_html=True,
     )
@@ -2026,7 +2235,7 @@ if aba_dashboard:
         with col_funil:
             with st.container(key="dash_funil_card"):
                 st.markdown(
-                    '<h3 style="margin:0;font-family:Orbitron,sans-serif;font-size:0.85rem;font-weight:600;'
+                    '<h3 style="margin:0;font-family:Inter,sans-serif;font-size:0.85rem;font-weight:700;'
                     'letter-spacing:0.12em;text-transform:uppercase;color:#F5F7FA;">Funil comercial</h3>'
                     '<div style="font-size:0.7rem;color:#5A6373;margin-top:0.2rem;">visão geral do pipeline ativo</div>',
                     unsafe_allow_html=True,
@@ -2048,7 +2257,7 @@ if aba_dashboard:
         with col_icp:
             with st.container(key="dash_icp_card"):
                 st.markdown(
-                    '<h3 style="margin:0;font-family:Orbitron,sans-serif;font-size:0.85rem;font-weight:600;'
+                    '<h3 style="margin:0;font-family:Inter,sans-serif;font-size:0.85rem;font-weight:700;'
                     'letter-spacing:0.12em;text-transform:uppercase;color:#F5F7FA;">ICP por segmento</h3>',
                     unsafe_allow_html=True,
                 )
@@ -2120,7 +2329,7 @@ if aba_dashboard:
                     with _coluna_radar:
                         st.markdown(
                             f"""
-                            <div class="attn-card">
+                            <div class="attn-card" style="border-left-color:{_cores_nivel.get(_nivel_op, '#8A94A6')}">
                               <div class="attn-kicker" style="color:{_cores_nivel.get(_nivel_op, '#8A94A6')}">{escape(_nivel_op)} · SCORE {_score_op}{_delta_txt}</div>
                               <div class="attn-title">{escape(str(_op.get('nome_empresa') or '—'))}</div>
                               <div class="attn-note">{escape(_why) if _why else 'Sem sinal comercial ativo ainda — monitorando.'}</div>
@@ -2197,7 +2406,7 @@ if aba_dashboard:
                 with coluna:
                     st.markdown(
                         f"""
-                        <div class="attn-card">
+                        <div class="attn-card" style="border-left-color:{cor}">
                           <div class="attn-kicker" style="color:{cor}">{escape(kicker)}</div>
                           <div class="attn-title">{escape(titulo)}</div>
                           <div class="attn-note">{escape(nota)}</div>
@@ -2488,10 +2697,17 @@ if aba_funil:
                         _empty_desc,
                         compacto=True,
                     )
-                for _, lead in leads_na_etapa.sort_values(
+                _leads_etapa_ordenados = leads_na_etapa.sort_values(
                     "pontuacao", ascending=False, na_position="last"
-                ).iterrows():
+                )
+                for _, lead in _leads_etapa_ordenados.head(LIMITE_CARDS_KANBAN_POR_ETAPA).iterrows():
                     _render_kanban_card(lead, etapa)
+                _restantes_etapa = len(_leads_etapa_ordenados) - LIMITE_CARDS_KANBAN_POR_ETAPA
+                if _restantes_etapa > 0:
+                    st.caption(
+                        f"+ {_restantes_etapa} outra(s) empresa(s) nesta etapa — "
+                        "use o Radar ou a busca em Clientes/Empresas para ver o restante."
+                    )
 
     _fechados_df = dados_funil[dados_funil["status"] == "Fechado / Contrato"]
     _descartados_df = dados_funil[dados_funil["status"] == "Descartado"]
@@ -2730,7 +2946,7 @@ if aba_prospeccao:
 def _confirmar_exclusao_campanha(campanha_id: int, nome: str) -> None:
     st.markdown(
         f'<p style="font-size:0.82rem;color:#C3CBD8;line-height:1.65;margin:0 0 0.2rem;">'
-        f'A campanha "{nome}" e seu histórico de execuções serão removidos. '
+        f'A campanha "{escape(nome)}" e seu histórico de execuções serão removidos. '
         f'Os leads já capturados permanecem na base.</p>',
         unsafe_allow_html=True,
     )
@@ -2839,7 +3055,7 @@ if aba_automacao:
                             ativa_nova = alternar_campanha(_cid)
                             st.session_state["aviso_automacao"] = "Campanha ativada." if ativa_nova else "Campanha pausada."
                             st.rerun()
-                        if exc_col.button("Excluir", key=f"del_camp_{_cid}", width="stretch"):
+                        if exc_col.button("Excluir", key=f"danger_del_camp_{_cid}", width="stretch"):
                             st.session_state["confirmar_exclusao_campanha_id"] = _cid
                             st.session_state["confirmar_exclusao_campanha_nome"] = campanha["nome"]
                             st.rerun()
@@ -3008,8 +3224,8 @@ if aba_automacao:
 def _confirmar_exclusao_lead(lead_id: int, nome: str, cidade: str, etapa: str) -> None:
     st.markdown(
         f'<p style="font-size:0.82rem;color:#C3CBD8;line-height:1.65;margin:0 0 0.2rem;">'
-        f'Você vai excluir <strong>{nome}</strong> (#{lead_id} · {cidade or "—"}), hoje em {etapa}. '
-        f'Esta ação não pode ser desfeita.</p>',
+        f'Você vai excluir <strong>{escape(nome)}</strong> (#{lead_id} · {escape(str(cidade)) if cidade else "—"}), '
+        f'hoje em {escape(etapa)}. Esta ação não pode ser desfeita.</p>',
         unsafe_allow_html=True,
     )
     digitado = st.text_input("Digite o nome da empresa para confirmar", key="digitado_exclusao_lead")
@@ -3055,12 +3271,31 @@ if aba_base:
         value=st.session_state.get("busca_empresas", ""),
         key=f"busca_empresas_{_versao_busca_empresas}",
     )
+    # Sincroniza de volta -- sem isso, "busca_empresas" só é escrito por quem
+    # pré-preenche de fora (botão "Abrir" do Pipeline, busca global da
+    # sidebar). Se o usuário editar o campo diretamente aqui e depois trocar
+    # de página e voltar (o widget "renasce" com essa mesma versão), o
+    # `value=` acima ainda aponta pro prefill antigo -- o campo voltava para
+    # o valor do "Abrir" em vez de continuar com o que o usuário digitou por
+    # último. Bug real encontrado em QA.
+    st.session_state["busca_empresas"] = termo
     filtro_nicho = f2.selectbox("Filtrar nicho", nichos, key="filtro_nicho_empresas")
     filtro_status = f3.selectbox("Filtrar status", ["Todos"] + STATUS, key="filtro_status_empresas")
     filtro_responsavel = f4.selectbox(
         "Filtrar responsável", responsaveis, key="filtro_responsavel_empresas"
     )
-    base = leads_visiveis(termo, filtro_nicho, filtro_status)
+    try:
+        base = leads_visiveis(termo, filtro_nicho, filtro_status)
+    except Exception as erro:
+        # Segunda camada de defesa (a causa raiz do bug de QA -- "status"
+        # ambíguo no JOIN com "usuarios" -- já foi corrigida em listar_leads,
+        # mas um erro de consulta aqui não deve mais derrubar a tela inteira
+        # com o traceback cru do Python exposto ao usuário final).
+        st.error(
+            "Não foi possível aplicar esses filtros agora. Tente novamente ou avise o time "
+            f"técnico com este detalhe: {erro}"
+        )
+        st.stop()
     if filtro_responsavel == "Sem responsável":
         base = base[base["responsavel_nome"].isna()].copy()
     elif filtro_responsavel != "Todos":
@@ -3126,10 +3361,19 @@ if aba_base:
         # (ambos viram ""), então isso não afeta o que é salvo -- só a exibição.
         base_editor = base[colunas].copy()
         base_editor["valor_proposta"] = pd.to_numeric(base_editor["valor_proposta"], errors="coerce")
-        base_editor["pontuacao"] = pd.to_numeric(base_editor["pontuacao"], errors="coerce")
         base_editor["proximo_contato"] = pd.to_datetime(base_editor["proximo_contato"], errors="coerce")
         for _coluna_texto_vazia in ("segmento_icp", "responsavel_nome"):
             base_editor[_coluna_texto_vazia] = base_editor[_coluna_texto_vazia].fillna("")
+        # "pontuacao" (Score) é somente leitura nesta grade -- confirmado que
+        # NumberColumn nesta versão do Streamlit mostra o texto "None" (não uma
+        # célula vazia) para valor ausente, com ou sem format/dtype nullable.
+        # Como é read-only, formatar como texto de antemão evita o bug sem
+        # custar a edição inline (valor_proposta/proximo_contato continuam
+        # editáveis e têm o mesmo problema visual, mas mexer no tipo deles
+        # tiraria o widget de edição -- fica registrado como limitação conhecida).
+        base_editor["pontuacao"] = pd.to_numeric(base_editor["pontuacao"], errors="coerce").apply(
+            lambda v: "" if pd.isna(v) else str(int(v))
+        )
 
         editado = st.data_editor(
             base_editor,
@@ -3143,11 +3387,11 @@ if aba_base:
             column_config={
                 "id": st.column_config.NumberColumn("ID", width="small"),
                 "cnpj": st.column_config.TextColumn("CNPJ"),
-                "nome_empresa": st.column_config.TextColumn("Empresa"),
-                "responsavel_nome": st.column_config.TextColumn("Responsável"),
-                "pontuacao": st.column_config.NumberColumn(
-                    "Score", min_value=0, max_value=100, format="%d"
-                ),
+                "nome_empresa": st.column_config.TextColumn("Empresa", width="large"),
+                "cidade": st.column_config.TextColumn("Cidade"),
+                "nicho": st.column_config.TextColumn("Nicho"),
+                "responsavel_nome": st.column_config.TextColumn("Responsável", width="medium"),
+                "pontuacao": st.column_config.TextColumn("Score"),
                 "motivo_qualificacao": st.column_config.TextColumn("Motivo da qualificação"),
                 "segmento_icp": st.column_config.TextColumn("Segmento ICP"),
                 "servicos_recomendados": st.column_config.TextColumn("Serviços Recomendados"),
@@ -3214,7 +3458,18 @@ if aba_base:
                             unsafe_allow_html=True,
                         )
 
-        csv_data = base.to_csv(index=False).encode("utf-8")
+                st.markdown(
+                    '<div class="section-title" style="margin-top:0.9rem;">Perfil da empresa (Receita)</div>',
+                    unsafe_allow_html=True,
+                )
+                render_perfil_empresa_receita(int(linha_detalhe["id"]))
+
+        base_export = base.copy()
+        colunas_texto_csv = base_export.select_dtypes(include="object").columns
+        base_export[colunas_texto_csv] = base_export[colunas_texto_csv].apply(
+            lambda coluna: coluna.map(_neutralizar_formula_csv)
+        )
+        csv_data = base_export.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="Exportar visão atual para CSV",
             data=csv_data,
@@ -3288,7 +3543,7 @@ if aba_base:
                         key="excluir_lead_select", label_visibility="collapsed",
                     )
                     if rotulo_excluir != "Selecione..." and st.button(
-                        "Excluir", key="abrir_confirmacao_exclusao", width="stretch"
+                        "Excluir", key="danger_abrir_confirmacao_exclusao", width="stretch"
                     ):
                         st.session_state["confirmar_exclusao_lead_id"] = opcoes_empresas[rotulo_excluir]
                         st.rerun()
@@ -3327,14 +3582,18 @@ if aba_contato:
 
     _base_contato = leads_visiveis()
     _contatados_recentes = leads_ja_contatados_ha_dias(14)
+    # Uma query só para toda a lista de supressão, e filtro vetorizado por
+    # telefone preenchido antes do loop -- com a base na casa de dezenas de
+    # milhares de leads (CNES), uma chamada a telefone_suprimido() (que abre
+    # conexão + faz query) por linha dentro do .iterrows() travava a tela
+    # inteira a cada rerun.
+    _telefones_suprimidos = listar_telefones_suprimidos()
+    _com_telefone = _base_contato[_base_contato["telefone"].fillna("").astype(str).str.strip() != ""]
     _elegiveis = []
-    for _, _linha in _base_contato.iterrows():
-        _telefone = str(_linha.get("telefone") or "").strip()
-        if not _telefone:
-            continue
+    for _, _linha in _com_telefone.iterrows():
         if int(_linha["id"]) in _contatados_recentes:
             continue
-        if telefone_suprimido(_telefone):
+        if _normalizar_telefone(_linha["telefone"]) in _telefones_suprimidos:
             continue
         _elegiveis.append(_linha)
 
@@ -3383,7 +3642,7 @@ if aba_contato:
                         st.session_state.get("usuario_logado", "sistema"),
                     )
                     st.rerun()
-                if _col_suprimir.button("Não contatar mais", key=f"suprimir_{_lead_contato['id']}", width="stretch"):
+                if _col_suprimir.button("Não contatar mais", key=f"danger_suprimir_{_lead_contato['id']}", width="stretch"):
                     adicionar_supressao(
                         _lead_contato["telefone"], "Solicitado pelo lead",
                         st.session_state.get("usuario_logado", "sistema"),
@@ -3415,12 +3674,6 @@ if aba_contato:
                 st.rerun()
             else:
                 st.warning("Informe um telefone.")
-
-def _fmt_data_radar(valor: Any) -> str:
-    if not valor:
-        return "—"
-    convertido = pd.to_datetime(valor, errors="coerce", utc=True)
-    return convertido.strftime("%d/%m/%Y %H:%M") if pd.notna(convertido) else str(valor)
 
 
 if aba_radar:
@@ -3510,24 +3763,37 @@ if aba_radar:
                 _linha_detalhe = _filtrado[_filtrado["id"] == _lead_id_detalhe].iloc[0]
                 _sinais_detalhe = listar_signals_ativos(_lead_id_detalhe)
 
+                _nivel_detalhe = str(_linha_detalhe["opportunity_level"] or "")
+                _fit_detalhe = int(_linha_detalhe["fit_score"] or 0)
+                _intent_detalhe = int(_linha_detalhe["intent_score"] or 0)
+                _timing_detalhe = int(_linha_detalhe["timing_score"] or 0)
+                _confianca_detalhe = int(_linha_detalhe["data_confidence_score"] or 0)
                 st.markdown(
                     f"""
                     <div class="campaign-card">
                       <div class="head"><div class="name">{escape(str(_linha_detalhe['nome_empresa']))}</div></div>
-                      <div class="scope">Opportunity Score {int(_linha_detalhe['opportunity_score'])} · {escape(str(_linha_detalhe['opportunity_level'] or ''))}</div>
+                      <div class="scope">
+                        Opportunity Score
+                        <strong style="color:{cor_por_nivel(_nivel_detalhe)}">{int(_linha_detalhe['opportunity_score'])}</strong>
+                        · <span style="color:{cor_por_nivel(_nivel_detalhe)}">{escape(_nivel_detalhe)}</span>
+                        · {formatar_delta_score(_linha_detalhe.get('opportunity_delta'))}
+                      </div>
                       <div class="metrics">
-                        <div><div class="m-label">Fit</div><div class="m-val">{int(_linha_detalhe['fit_score'] or 0)}</div></div>
-                        <div><div class="m-label">Intent</div><div class="m-val">{int(_linha_detalhe['intent_score'] or 0)}</div></div>
-                        <div><div class="m-label">Timing</div><div class="m-val">{int(_linha_detalhe['timing_score'] or 0)}</div></div>
-                        <div><div class="m-label">Confiança</div><div class="m-val">{int(_linha_detalhe['data_confidence_score'] or 0)}</div></div>
+                        <div><div class="m-label">Fit</div><div class="m-val" style="color:{cor_por_pontuacao(_fit_detalhe)}">{_fit_detalhe}</div></div>
+                        <div><div class="m-label">Intent</div><div class="m-val" style="color:{cor_por_pontuacao(_intent_detalhe)}">{_intent_detalhe}</div></div>
+                        <div><div class="m-label">Timing</div><div class="m-val" style="color:{cor_por_pontuacao(_timing_detalhe)}">{_timing_detalhe}</div></div>
+                        <div><div class="m-label">Confiança</div><div class="m-val" style="color:{cor_por_pontuacao(_confianca_detalhe)}">{_confianca_detalhe}</div></div>
                       </div>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
 
-                st.markdown(f"**Why this company:** {escape(str(_linha_detalhe.get('opportunity_reason') or '—'))}")
-                st.markdown(f"**Why now:** {escape(str(_linha_detalhe.get('why_now') or '—'))}")
+                st.markdown(f"**Por que essa empresa:** {escape(str(_linha_detalhe.get('opportunity_reason') or '—'))}")
+                st.markdown(f"**Por que agora:** {escape(str(_linha_detalhe.get('why_now') or '—'))}")
+
+                with st.expander("Perfil da empresa (Receita)", icon=":material/apartment:"):
+                    render_perfil_empresa_receita(_lead_id_detalhe)
 
                 with st.expander("Evidências", icon=":material/fact_check:"):
                     if not _sinais_detalhe:
@@ -3552,6 +3818,90 @@ if aba_radar:
                     _linha_detalhe.to_dict(),
                 )
                 st.markdown(f"**Próxima melhor ação:** {escape(_proxima_acao)}")
+
+                _servico_sugerido = recommend_service(
+                    str(_linha_detalhe.get("segmento_icp") or ""), _sinais_detalhe
+                )
+                if _servico_sugerido and _servico_sugerido.get("servico"):
+                    st.markdown(
+                        f"**Serviço recomendado:** {escape(_servico_sugerido['servico'])} "
+                        f"— {escape(_servico_sugerido['motivo'])}"
+                    )
+
+    try:
+        with obras_dump.conectar() as _con_obras_radar:
+            obras_dump.migrar_esquema(_con_obras_radar)
+            _obras_pendentes = obras_dump.listar_pendentes_revisao(_con_obras_radar)
+    except Exception:
+        _obras_pendentes = []
+
+    _titulo_obras_radar = "Obras que podem virar oportunidade"
+    if _obras_pendentes:
+        _titulo_obras_radar += f" ({len(_obras_pendentes)})"
+    st.markdown(
+        f'<div class="section-title" style="margin-top:1.2rem;">{_titulo_obras_radar}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Encontramos uma obra grande (construção, reforma ou ampliação) nesse endereço, mas "
+        "ainda não sabemos qual empresa vai ocupar o espaço -- obras desse porte costumam "
+        "precisar de CFTV, controle de acesso, rede e infraestrutura elétrica. Se você souber "
+        "quem é, cadastre; a evidência já vai anexada nas observações."
+    )
+
+    if not _obras_pendentes:
+        st.caption("Nenhuma obra pendente de revisão agora.")
+    else:
+        _tipos_obra_rotulo = {
+            "aprovacao": "Projeto aprovado", "execucao": "Em execução", "reforma": "Em reforma",
+            "demolicao": "Em demolição", "regularizacao": "Em regularização",
+            "habite-se": "Pronta para ocupação (Habite-se)",
+        }
+        for _obra in _obras_pendentes:
+            _chave_obra = re.sub(r"[^a-zA-Z0-9_]", "_", f"{_obra['cidade']}_{_obra['id_alvara']}_{_obra['competencia']}")
+            with st.container(key=f"obra_pendente_{_chave_obra}", border=True):
+                _tipo_rotulo = _tipos_obra_rotulo.get(_obra.get("tipo"), (_obra.get("tipo") or "obra").capitalize())
+                _area_obra = _obra.get("area_construida")
+                _data_emissao_obra = _obra.get("data_emissao")
+                _data_obra = _data_emissao_obra.strftime("%d/%m/%Y") if _data_emissao_obra else ""
+                st.markdown(f"**{escape(str(_obra.get('proprietario') or 'Proprietário não informado'))}**")
+                st.caption(
+                    f"{_tipo_rotulo}"
+                    + (f" · {_area_obra:,.0f} m² de área construída" if _area_obra else "")
+                    + f" · {escape(str(_obra.get('bairro') or ''))}, {escape(str(_obra.get('municipio_nome') or ''))}"
+                    + (f" · alvará de {_data_obra}" if _data_obra else "")
+                )
+                st.caption(f"Referência: alvará nº {escape(str(_obra.get('id_alvara') or '—'))}")
+                _col_criar_obra, _col_ignorar_obra = st.columns(2)
+                if _col_criar_obra.button("Cadastrar empresa", key=f"criar_lead_{_chave_obra}", width="stretch"):
+                    _endereco_obra = " ".join(
+                        str(p) for p in (_obra.get("endereco"), _obra.get("numero")) if p
+                    ).strip()
+                    _cidade_obra = ", ".join(
+                        str(p) for p in (_obra.get("municipio_nome"), _obra.get("uf")) if p
+                    )
+                    st.session_state["nova_empresa_prefill"] = {
+                        "nome_empresa": str(_obra.get("proprietario") or ""),
+                        "endereco": _endereco_obra,
+                        "cidade": _cidade_obra,
+                        "observacoes": (
+                            f"Detectado via alvará de obras ({_tipo_rotulo.lower()}"
+                            + (f", {_area_obra:,.0f} m²" if _area_obra else "")
+                            + f") em {_obra.get('bairro') or 'endereço não detalhado'}. "
+                            "Confirme os dados antes do contato comercial."
+                        ),
+                    }
+                    st.session_state["nova_empresa_prefill_obra_ref"] = (
+                        _obra["cidade"], _obra["id_alvara"], _obra["competencia"]
+                    )
+                    st.session_state["navegacao_solicitada"] = "Nova empresa"
+                    st.rerun()
+                if _col_ignorar_obra.button("Ignorar", key=f"danger_ignorar_{_chave_obra}", width="stretch"):
+                    with obras_dump.conectar() as _con_ignorar_obra:
+                        obras_dump.marcar_revisao(
+                            _con_ignorar_obra, _obra["cidade"], _obra["id_alvara"], _obra["competencia"], "ignorado"
+                        )
+                    st.rerun()
 
 if aba_manual:
     aviso_nova_empresa = st.session_state.pop("aviso_nova_empresa", None)
@@ -3597,6 +3947,9 @@ if aba_manual:
                 st.error(_resultado_cnpj_manual["erro"])
             else:
                 st.session_state["nova_empresa_prefill"] = enriquecer_lead_icp(_resultado_cnpj_manual)
+                # Consulta por CNPJ é uma fonte de dado diferente da fila de obras --
+                # não associa o cadastro resultante a uma obra que não tem relação.
+                st.session_state.pop("nova_empresa_prefill_obra_ref", None)
                 st.session_state["versao_form_nova_empresa"] = _versao_form_nova + 1
                 st.rerun()
 
@@ -3639,7 +3992,9 @@ if aba_manual:
         decisor = c2.text_input("Contato/decisor", value=_prefill.get("decisor", ""), key=_campo_nova("decisor"))
         email = c1.text_input("E-mail", value=_prefill.get("email", ""), key=_campo_nova("email"))
         telefone = c2.text_input("Telefone", value=_prefill.get("telefone", ""), key=_campo_nova("telefone"))
-        observacoes = st.text_area("Observações", key=_campo_nova("obs"))
+        observacoes = st.text_area(
+            "Observações", value=_prefill.get("observacoes", ""), key=_campo_nova("obs")
+        )
 
         with st.expander(
             "Dados do pipeline (opcional)",
@@ -3687,12 +4042,21 @@ if aba_manual:
                 "decisor": decisor.strip(), "nicho": nicho.strip(), "valor_proposta": valor_proposta_manual,
                 "endereco": endereco.strip(), "cidade": cidade.strip(), "telefone": telefone.strip(), "proximo_contato": proximo_contato_manual,
                 "site": site.strip(), "email": email.strip(), "status": status_manual,
-                "status_receita": "", "origem": "Cadastro manual", "observacoes": observacoes.strip(),
+                "status_receita": "",
+                "origem": "Alvará de obras (revisão manual)" if st.session_state.get("nova_empresa_prefill_obra_ref") else "Cadastro manual",
+                "observacoes": observacoes.strip(),
             }
             inseridos, _ = salvar_leads([enriquecer_lead_icp(lead)])
             if inseridos:
                 st.cache_data.clear()
                 st.session_state.pop("nova_empresa_prefill", None)
+                _ref_obra_criada = st.session_state.pop("nova_empresa_prefill_obra_ref", None)
+                if _ref_obra_criada:
+                    try:
+                        with obras_dump.conectar() as _con_obra_criada:
+                            obras_dump.marcar_revisao(_con_obra_criada, *_ref_obra_criada, "lead_criado")
+                    except Exception:
+                        pass  # a fila de revisão é auxiliar -- não bloqueia o cadastro do lead
                 st.session_state["versao_form_nova_empresa"] = _versao_form_nova + 1
                 st.session_state["aviso_nova_empresa"] = f"Cadastrada e enviada a {status_manual}"
                 st.rerun()
@@ -3772,9 +4136,15 @@ if aba_equipe:
                 )
                 if pode_alternar_esta_linha:
                     rotulo_botao = "Desativar" if ativo else "Ativar"
+                    # Prefixo "danger_" só quando a ação É a destrutiva
+                    # (Desativar) -- "Ativar" continua com a key/estilo neutro.
+                    _chave_toggle = (
+                        f"danger_toggle_usuario_{usuario_linha['id']}" if ativo
+                        else f"toggle_usuario_{usuario_linha['id']}"
+                    )
                     if col_acao.button(
                         rotulo_botao,
-                        key=f"toggle_usuario_{usuario_linha['id']}",
+                        key=_chave_toggle,
                         width="stretch",
                     ):
                         alternar_status_usuario(usuario_linha["id"])
@@ -3889,10 +4259,10 @@ if aba_equipe:
                 st.rerun()
 
 st.markdown(
-    """
+    f"""
     <div class="app-footer">
     <span>Scorpions CRM • Pipeline comercial e prospecção</span>
-      <span>Atualizado em 2026</span>
+      <span>Atualizado em {datetime.now().year}</span>
     </div>
     """,
     unsafe_allow_html=True,

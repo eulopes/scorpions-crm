@@ -1,18 +1,24 @@
             @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap');
 
+      /* Paleta alinhada ao SCORPIONS_BRAND_BOOK.html v1.0: bg/panel/line usam os
+         4 neutros oficiais (Deep Black, Dark Graphite, Blue Graphite) e primary/
+         secondary/accent usam os 3 azuis oficiais (Light Cyan, Royal Tech, Electric).
+         danger/success/warning ficam fora da paleta de marca de propósito -- são
+         cores semânticas de estado (erro/sucesso/alerta), não cor de marca; o
+         manual proíbe vermelho/laranja/amarelo em uso de marca, não em UI de sistema. */
       :root {
-                --bg: #07090D;
-                --panel: #0D1118;
-                --panel-strong: #0A0C11;
-                --line: #1C2735;
+                --bg: #0A0A0F;
+                --panel: #111319;
+                --panel-strong: #0A0A0F;
+                --line: #1E232B;
                 --line-strong: #2D333D;
                 --text: #F4F7FB;
                 --text-secondary: #C3CBD8;
                 --muted: #7F8B9B;
                 --weak: #5A6373;
                 --primary: #70D3FC;
-                --secondary: #2568FF;
-                --accent: #0D6EFD;
+                --secondary: #256BFF;
+                --accent: #006EFD;
                 --danger: #FF667D;
                 --danger-strong: #ffb3b3;
                 --success: #35D07F;
@@ -22,36 +28,62 @@
                 --shadow-elevated: 0 1px 2px rgba(0, 0, 0, .4), 0 20px 40px rgba(0, 0, 0, .32);
                 --shadow-soft: 0 1px 1px rgba(0, 0, 0, .3), 0 10px 24px rgba(0, 0, 0, .22);
                 --ease-premium: cubic-bezier(0.16, 1, 0.3, 1);
+
+                /* Escala de espaçamento (base 4px) -- usada em padding/gap de
+                   qualquer superfície nova ou revisada, pra parar de acumular
+                   dezenas de valores "quase iguais" (0.78/0.82/0.85/0.9/1.1rem...)
+                   que fazem cards parecidos parecerem desalinhados entre si. */
+                --sp-1: 0.25rem;
+                --sp-2: 0.5rem;
+                --sp-3: 0.75rem;
+                --sp-4: 1rem;
+                --sp-5: 1.5rem;
+                --sp-6: 2rem;
+
+                /* Escala tipográfica (7 degraus, um papel por degrau). Mesma
+                   lógica: reduz dezenas de font-size quase-iguais a um conjunto
+                   fechado, então dois elementos do mesmo papel (ex.: texto de
+                   apoio) sempre casam entre telas diferentes. */
+                --fs-micro: 0.6875rem;
+                --fs-meta: 0.75rem;
+                --fs-body: 0.8125rem;
+                --fs-emphasis: 0.9375rem;
+                --fs-subtitle: 1.125rem;
+                --fs-title: 1.5rem;
+                --fs-hero: 2.1rem;
       }
 
+      /* html/body precisam do mesmo --bg do .stApp -- sem isso, o branco
+         padrão do navegador aparece nas bordas (scroll elástico, página
+         mais curta que a viewport, redimensionar janela). */
+      html, body { background: var(--bg); }
       html, body, .stApp, [class*="css"] { font-family: Inter, system-ui, sans-serif; }
 
+      /* Fundo chapado (sem glow) -- o manual de marca pede "menos efeito,
+         mais precisão" e proíbe explicitamente glow intenso/estética gamer.
+         A textura vem só da grade fina em .stApp::before (padrão oficial
+         "matriz digital/circuitos" do brand book), não de um wash colorido. */
       .stApp {
-                background:
-                    radial-gradient(circle at 78% 0%, rgba(37, 104, 255, 0.14), transparent 42%),
-                    radial-gradient(circle at 8% 85%, rgba(112, 211, 252, 0.05), transparent 38%),
-                    var(--bg);
+        background: var(--bg);
         color: var(--text);
       }
 
       :focus-visible { outline: 1px solid var(--primary) !important; outline-offset: 2px !important; }
 
-            .stApp::before {
-                content: "";
-                position: fixed;
-                inset: 0;
-                background-image:
-                    linear-gradient(rgba(112, 211, 252, 0.025) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(112, 211, 252, 0.025) 1px, transparent 1px);
-                background-size: 60px 60px;
-                mask-image: linear-gradient(to bottom, black, transparent 78%);
-                pointer-events: none;
-                z-index: 0;
-            }
+            /* Tentei uma textura de fundo com o padrão "hexágonos" do brand
+               book, mas repetida em bloco por trás de telas densas ela lia
+               como um textura de "escamas" incômoda, não hexágonos limpos --
+               removida. Fundo chapado é, aliás, mais fiel ao "menos efeito,
+               mais precisão" do próprio manual do que qualquer textura. */
 
+      /* stHeader não tem nenhum conteúdo visível aqui (toolbarMode=minimal
+         some com tudo) -- mas ainda ocupa uma faixa de 60px no topo. Um
+         fundo translúcido com blur nela virava uma tarja vazia e vistosa
+         acima do título de cada página; deixando transparente, o espaço
+         continua reservado (sem quebrar layout) mas não aparece mais. */
       [data-testid="stHeader"] {
-        background: rgba(6, 17, 28, 0.7);
-        backdrop-filter: blur(10px);
+        background: transparent;
+        height: 2.25rem;
       }
 
       .block-container {
@@ -101,14 +133,14 @@
 
             .brand-lockup span {
                 color: var(--primary);
-                font-size: 0.6rem;
+                font-size: var(--fs-micro);
                 letter-spacing: 0.18em;
                 text-transform: uppercase;
             }
 
             .sidebar-caption {
                 color: var(--weak);
-                font-size: 0.65rem;
+                font-size: var(--fs-micro);
                 letter-spacing: 0.2em;
                 text-transform: uppercase;
                 margin: 1.1rem 0 0.4rem;
@@ -120,48 +152,25 @@
                 align-items: center;
                 gap: 0.5rem;
                 color: var(--muted);
-                font-size: 0.72rem;
+                font-size: var(--fs-meta);
                 padding: 0 0.5rem;
                 margin-bottom: 0.6rem;
             }
 
+            /* Indicador sólido, sem pulso -- o manual de marca proíbe glow
+               intenso/estética gamer; o estado já é comunicado pela cor. */
             .sidebar-status .dot {
                 width: 6px;
                 height: 6px;
                 border-radius: 50%;
                 background: var(--primary);
                 flex: none;
-                animation: scorp-pulse 2.2s infinite;
-            }
-
-            @keyframes scorp-pulse {
-                0% { box-shadow: 0 0 0 0 rgba(125, 211, 252, .5); }
-                100% { box-shadow: 0 0 0 7px rgba(125, 211, 252, 0); }
-            }
-            @keyframes scorp-trace {
-                0% { transform: translateX(-100%); }
-                100% { transform: translateX(300%); }
-            }
-            .trace-line {
-                position: relative;
-                height: 1px;
-                overflow: hidden;
-                background: var(--line);
-                margin-bottom: 0.9rem;
-            }
-            .trace-line::after {
-                content: "";
-                position: absolute;
-                top: 0; left: 0;
-                width: 40%; height: 1px;
-                background: linear-gradient(90deg, transparent, var(--secondary), var(--primary));
-                animation: scorp-trace 4s linear infinite;
             }
 
             [data-testid="stSidebar"] [data-testid="stTextInput"] input {
                 background: var(--panel);
                 border-color: rgba(125, 211, 252, .18);
-                font-size: 0.8rem;
+                font-size: var(--fs-body);
             }
 
       /* --- Page header compacto (reutilizado em toda página via render_page_header) --- */
@@ -181,7 +190,7 @@
       .st-key-page_header .stButton > button {
         min-height: 2.15rem;
         padding: 0.38rem 0.78rem;
-        font-size: 0.76rem;
+        font-size: var(--fs-meta);
         white-space: nowrap;
       }
 
@@ -191,8 +200,8 @@
         background-clip: text;
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        font-family: Orbitron, Inter, sans-serif;
-        font-weight: 600;
+        font-family: Inter, sans-serif;
+        font-weight: 700;
         font-size: 1.22rem;
         letter-spacing: 0.03em;
         text-transform: uppercase;
@@ -205,7 +214,7 @@
         flex-wrap: wrap;
         justify-content: flex-end;
       }
-      .page-header-sub { margin: 0.24rem 0 0; color: var(--muted); font-size: 0.78rem; }
+      .page-header-sub { margin: 0.24rem 0 0; color: var(--muted); font-size: var(--fs-meta); }
       .context-pill {
         display: inline-flex;
         align-items: center;
@@ -214,76 +223,90 @@
         border-radius: 999px;
         padding: 0.28rem 0.62rem;
         font-weight: 600;
-        font-size: 0.69rem;
+        font-size: var(--fs-micro);
         white-space: nowrap;
       }
 
-      /* Título de seção compacto reutilizável (substitui os <h3> inline repetidos) */
+      /* Título de seção compacto reutilizável (substitui os <h3> inline repetidos).
+         Mesmo tamanho de .dashed-title/.card-title/.empty-title -- as quatro
+         são o mesmo papel (mini-título em caixa alta) e devem casar sempre. */
       .section-title {
-        margin: 0 0 0.5rem; font-family: Orbitron, Inter, sans-serif; font-size: 0.8rem; font-weight: 600;
+        margin: 0 0 var(--sp-2); font-family: Inter, sans-serif; font-size: var(--fs-meta); font-weight: 700;
         letter-spacing: 0.1em; text-transform: uppercase; color: var(--text);
       }
-      .section-sub { font-size: 0.72rem; color: var(--weak); margin: -0.3rem 0 0.6rem; }
+      .section-sub { font-size: var(--fs-meta); color: var(--weak); margin: -0.3rem 0 0.6rem; }
 
+      /* Métrica-hero: UM número por página, com peso visual real (o resto
+         da grade é deliberadamente mais quieto que ele). Resolve o problema
+         de layout de antes -- "Valor em pipeline" ficava sobrando sozinho
+         numa grade auto-fit de 6 itens porque nada a diferenciava das
+         outras 5; agora ela tem motivo pra ser o único item da própria linha. */
+      .kpi-hero {
+        display: block;
+        position: relative;
+        background: linear-gradient(135deg, rgba(0, 110, 253, .16), var(--panel-strong) 70%);
+        border: 1px solid rgba(112, 211, 252, .3);
+        border-radius: var(--radius);
+        padding: var(--sp-4) var(--sp-5);
+        margin-bottom: var(--sp-3);
+        box-shadow: var(--shadow-soft);
+      }
+      .kpi-hero .label {
+        display: block; color: var(--primary); font-size: var(--fs-meta);
+        font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em;
+      }
+      .kpi-hero strong {
+        display: block;
+        margin-top: var(--sp-1);
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 600;
+        font-size: var(--fs-hero);
+        line-height: 1.15;
+        letter-spacing: -0.01em;
+        background: linear-gradient(120deg, #ffffff, var(--primary));
+        background-clip: text;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      .kpi-hero .note { display: block; margin-top: var(--sp-1); font-size: var(--fs-meta); color: var(--muted); }
+
+      /* Grade secundária: 5 colunas fixas (não auto-fit) -- assim ela sempre
+         divide igual numa linha só, sem sobra, e fica visivelmente mais
+         quieta que o kpi-hero acima (sem gradiente, sem sombra elevada). */
       .sales-summary {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 0.6rem;
-        margin: 0 0 0.9rem 0;
+        grid-template-columns: repeat(5, 1fr);
+        gap: var(--sp-2);
+        margin: 0 0 var(--sp-4) 0;
       }
 
       .sales-summary__item {
-                position: relative;
-                overflow: hidden;
-                background: linear-gradient(155deg, var(--panel), var(--panel-strong));
+                background: var(--panel);
         border: 1px solid var(--line);
-                border-radius: var(--radius);
-        padding: 0.85rem 1rem;
-        min-height: 82px;
-                box-shadow: var(--shadow-soft);
-                transition: border-color 0.25s var(--ease-premium), transform 0.25s var(--ease-premium), box-shadow 0.25s var(--ease-premium);
+                border-radius: var(--radius-sm);
+        padding: var(--sp-3);
+                transition: border-color 0.2s var(--ease-premium), background 0.2s var(--ease-premium);
       }
 
       .sales-summary__item:hover {
-                transform: translateY(-2px);
-                border-color: rgba(112, 211, 252, .35);
-                box-shadow: var(--shadow-elevated);
-      }
-
-      .sales-summary__item::before {
-                content: "";
-                position: absolute;
-                top: 0; left: 0; right: 0;
-                height: 1px;
-                background: linear-gradient(90deg, transparent, rgba(112, 211, 252, .55), transparent);
-      }
-
-      .sales-summary__item.accent {
-                border-color: rgba(112, 211, 252, .35);
-                background: linear-gradient(155deg, rgba(37, 104, 255, .1), var(--panel-strong));
-      }
-      .sales-summary__item.accent strong {
-                font-size: 1.9rem;
-                background: linear-gradient(120deg, #ffffff, var(--primary));
-                background-clip: text;
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
+                border-color: var(--line-strong);
+                background: var(--panel-strong);
       }
 
       .sales-summary__item .label {
         display: block;
         color: var(--weak);
-        font-size: 0.68rem;
+        font-size: var(--fs-micro);
         text-transform: uppercase;
-        letter-spacing: 0.14em;
+        letter-spacing: 0.12em;
       }
 
       .sales-summary__item strong {
         display: block;
-        margin-top: 0.5rem;
-        font-family: "JetBrains Mono", Orbitron, monospace;
+        margin-top: var(--sp-2);
+        font-family: "JetBrains Mono", monospace;
         font-weight: 600;
-        font-size: 1.55rem;
+        font-size: var(--fs-title);
         line-height: 1.2;
         color: var(--text);
         letter-spacing: -0.01em;
@@ -291,8 +314,8 @@
 
       .sales-summary__item .note {
         display: block;
-        margin-top: 0.2rem;
-        font-size: 0.72rem;
+        margin-top: var(--sp-1);
+        font-size: var(--fs-meta);
         color: var(--muted);
       }
 
@@ -302,7 +325,7 @@
                 color: var(--primary);
         border: 1px solid rgba(125, 211, 252, .28);
                 border-radius: 3px;
-        font-size: 0.65rem;
+        font-size: var(--fs-micro);
         font-weight: 700;
         letter-spacing: 0.1em;
         text-transform: uppercase;
@@ -315,8 +338,8 @@
         background-clip: text;
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        font-family: Orbitron, Inter, sans-serif;
-        font-weight: 600;
+        font-family: Inter, sans-serif;
+        font-weight: 700;
         font-size: 1.7rem;
         letter-spacing: 0.04em;
         text-transform: uppercase;
@@ -326,7 +349,7 @@
       .header-shell p, .st-key-header_shell p {
         margin: 0;
         color: var(--muted);
-        font-size: 0.92rem;
+        font-size: var(--fs-emphasis);
       }
 
       .status-pill {
@@ -339,7 +362,7 @@
         border-radius: 999px;
         padding: 0.28rem 0.62rem;
         font-weight: 600;
-        font-size: 0.69rem;
+        font-size: var(--fs-micro);
         letter-spacing: 0.04em;
         white-space: nowrap;
       }
@@ -351,10 +374,8 @@
         border-radius: 50%;
         background: currentColor;
         display: inline-block;
-        animation: scorp-pulse 2.2s infinite;
       }
       .status-pill.status-offline { color: var(--muted); border-color: var(--line-strong); }
-      .status-pill.status-offline::before { animation: none; }
       .status-pill.status-warning { color: var(--warning); border-color: rgba(243, 199, 95, .35); }
       .status-pill.status-error { color: var(--danger); border-color: rgba(255, 102, 125, .35); }
 
@@ -379,7 +400,7 @@
                 background: transparent;
                 color: var(--text);
         font-weight: 600;
-        font-size: 0.82rem;
+        font-size: var(--fs-body);
         transition: border-color 0.2s var(--ease-premium), background 0.2s var(--ease-premium), transform 0.2s var(--ease-premium);
       }
 
@@ -415,7 +436,7 @@
         color: var(--text);
         border: 1px solid var(--line-strong);
         border-radius: var(--radius-sm);
-        font-size: 0.82rem;
+        font-size: var(--fs-body);
         transition: border-color 0.2s var(--ease-premium), box-shadow 0.2s var(--ease-premium);
       }
 
@@ -431,39 +452,41 @@
       div[data-testid="stAlertContentError"] svg { color: var(--danger) !important; }
 
       .soft-badge {
-                font-family: Orbitron, Inter, sans-serif;
+                font-family: Inter, sans-serif;
                 background: rgba(37, 104, 255, 0.12);
                 border: 1px solid rgba(125, 211, 252, 0.35);
                 color: var(--primary);
                 border-radius: 3px;
         padding: 0.15rem 0.5rem;
-        font-size: 0.68rem;
+        font-size: var(--fs-micro);
         font-weight: 600;
       }
 
+      /* Superfície "flat": para dado repetido/escaneado em lista (muitos
+         cards por coluna). Sem gradiente nem sombra em repouso -- isso fica
+         reservado para painéis únicos (KPI, detalhe), senão tudo no app
+         parece a mesma caixa. A cor da borda esquerda vem do próprio score
+         (score-hi/mid/lo, já calculado em app.py) -- prioridade visível de
+         relance, não só no badge pequeno do canto. */
       .kanban-card {
                 position: relative;
-                overflow: hidden;
-                background: linear-gradient(155deg, var(--panel), var(--panel-strong));
+                background: var(--panel);
                 border: 1px solid var(--line);
-                border-radius: var(--radius);
-        padding: 0.82rem 0.85rem 0.72rem;
-        margin-bottom: 0.5rem;
-                box-shadow: var(--shadow-soft);
-                transition: border-color .25s var(--ease-premium), box-shadow .25s var(--ease-premium), transform .25s var(--ease-premium);
+                border-left: 3px solid var(--line-strong);
+                border-radius: var(--radius-sm);
+        padding: var(--sp-3) var(--sp-3) var(--sp-2);
+        margin-bottom: var(--sp-2);
+                transition: border-color .2s var(--ease-premium), background .2s var(--ease-premium), transform .2s var(--ease-premium);
       }
-      .kanban-card::before {
-                content: "";
-                position: absolute;
-                top: 0; left: 0; right: 0;
-                height: 1px;
-                background: linear-gradient(90deg, transparent, rgba(112, 211, 252, .5), transparent);
-      }
+      .kanban-card.score-hi { border-left-color: var(--primary); }
+      .kanban-card.score-mid { border-left-color: var(--warning); }
       .kanban-card:hover {
-                border-color: rgba(112, 211, 252, .45);
-                box-shadow: var(--shadow-elevated);
-                transform: translateY(-2px);
+                border-color: var(--line-strong);
+                background: var(--panel-strong);
+                transform: translateX(1px);
       }
+      .kanban-card.score-hi:hover { border-left-color: var(--primary); }
+      .kanban-card.score-mid:hover { border-left-color: var(--warning); }
 
       .kanban-topline {
         display: flex;
@@ -475,20 +498,20 @@
 
       .kanban-company {
         font-weight: 600;
-        font-size: 0.92rem;
+        font-size: var(--fs-emphasis);
         line-height: 1.3;
         color: var(--text);
       }
 
       .kanban-meta {
         color: var(--muted);
-        font-size: 0.76rem;
+        font-size: var(--fs-meta);
         margin-top: 0.25rem;
       }
 
       .kanban-location {
         color: var(--muted);
-        font-size: 0.73rem;
+        font-size: var(--fs-meta);
         line-height: 1.45;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -507,7 +530,7 @@
       .kanban-fact > span {
         display: block;
         color: var(--weak);
-        font-size: 0.58rem;
+        font-size: var(--fs-micro);
         letter-spacing: 0.08em;
         text-transform: uppercase;
       }
@@ -515,7 +538,7 @@
         display: block;
         margin-top: 0.15rem;
         color: var(--text-secondary);
-        font-size: 0.71rem;
+        font-size: var(--fs-meta);
         font-weight: 600;
         line-height: 1.35;
       }
@@ -523,7 +546,7 @@
       .kanban-owner {
         margin-top: 0.55rem;
         color: var(--muted);
-        font-size: 0.69rem;
+        font-size: var(--fs-meta);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -541,8 +564,8 @@
         flex: 1;
         min-width: 0;
         color: var(--text);
-        font-size: 0.69rem;
-        font-weight: 600;
+        font-size: var(--fs-micro);
+        font-weight: 700;
         letter-spacing: 0.06em;
         line-height: 1.35;
         text-transform: uppercase;
@@ -550,12 +573,12 @@
       .kanban-stage-count {
         color: var(--muted);
         font-family: "JetBrains Mono", monospace;
-        font-size: 0.69rem;
+        font-size: var(--fs-micro);
       }
       .kanban-stage-value {
         margin: 0.3rem 0 0.55rem;
         color: var(--weak);
-        font-size: 0.65rem;
+        font-size: var(--fs-micro);
       }
 
       .kanban-contatos {
@@ -573,7 +596,7 @@
         padding-top: 0.75rem;
         border-top: 1px solid var(--line);
         color: var(--weak);
-        font-size: 0.76rem;
+        font-size: var(--fs-meta);
         display: flex;
         justify-content: space-between;
         gap: 1rem;
@@ -596,7 +619,7 @@
         border-left: 2px solid transparent;
         padding: 0.5rem 0.6rem;
         color: var(--muted);
-        font-size: 0.82rem;
+        font-size: var(--fs-body);
         transition: background 0.15s ease, color 0.15s ease;
       }
       [data-testid="stSidebar"] [role="radiogroup"] label:hover {
@@ -621,7 +644,7 @@
       .stTabs [data-baseweb="tab"] {
         color: var(--muted);
         font-weight: 600;
-        font-size: 0.85rem;
+        font-size: var(--fs-body);
       }
       .stTabs [aria-selected="true"] {
         color: var(--text) !important;
@@ -634,7 +657,7 @@
       /* --- Chips --- */
       .chip {
         display: inline-block;
-        font-size: 0.62rem;
+        font-size: var(--fs-micro);
         letter-spacing: 0.06em;
         padding: 0.12rem 0.5rem;
         border-radius: 3px;
@@ -646,8 +669,9 @@
 
       /* --- Score badge --- */
       .score-badge {
-        font-family: Orbitron, Inter, sans-serif;
-        font-size: 0.68rem;
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 600;
+        font-size: var(--fs-micro);
         padding: 0.12rem 0.5rem;
         border-radius: 3px;
         flex: none;
@@ -660,7 +684,7 @@
       .funnel-row { margin-bottom: 0.9rem; }
       .funnel-row:last-child { margin-bottom: 0; }
       .funnel-row .funnel-top {
-        display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--muted);
+        display: flex; justify-content: space-between; font-size: var(--fs-meta); color: var(--muted);
       }
       .funnel-row .funnel-top .val { color: var(--text); }
       .funnel-row .funnel-top .sep { color: var(--weak); }
@@ -670,16 +694,15 @@
       .funnel-fill {
         height: 6px; border-radius: 999px;
         background: linear-gradient(90deg, var(--accent), var(--primary));
-        box-shadow: 0 0 10px rgba(37, 104, 255, .5);
       }
 
       /* --- ICP rows --- */
       .icp-row {
-        display: flex; align-items: center; gap: 0.6rem; font-size: 0.8rem;
+        display: flex; align-items: center; gap: 0.6rem; font-size: var(--fs-body);
         padding: 0.3rem 0; color: var(--text);
       }
       .icp-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .icp-row .leads { font-size: 0.72rem; color: var(--muted); }
+      .icp-row .leads { font-size: var(--fs-meta); color: var(--muted); }
 
       .icp-alert {
         margin-top: 1rem;
@@ -689,29 +712,34 @@
         border-radius: 3px;
         padding: 0.75rem 0.9rem;
       }
-      .icp-alert .icp-alert-title { font-size: 0.8rem; font-weight: 600; color: var(--primary); }
-      .icp-alert p { font-size: 0.74rem; color: var(--muted); margin: 0.3rem 0 0.6rem; line-height: 1.6; }
+      .icp-alert .icp-alert-title { font-size: var(--fs-body); font-weight: 600; color: var(--primary); }
+      .icp-alert p { font-size: var(--fs-meta); color: var(--muted); margin: 0.3rem 0 0.6rem; line-height: 1.6; }
 
-      /* --- Attention cards --- */
+      /* --- Attention cards: superfície "raised" (painel de leitura pontual,
+         poucos por tela) com acento de cor à esquerda -- a mesma cor do
+         nível de oportunidade já usada no kicker, não uma decoração nova. */
       .attn-card {
-        background: linear-gradient(155deg, var(--panel-strong), var(--bg)); border: 1px solid var(--line); border-radius: var(--radius);
-        padding: 0.9rem 1rem; height: 100%; box-shadow: var(--shadow-soft);
+        background: linear-gradient(155deg, var(--panel), var(--panel-strong));
+        border: 1px solid var(--line);
+        border-left: 3px solid var(--line-strong);
+        border-radius: var(--radius);
+        padding: var(--sp-4); height: 100%; box-shadow: var(--shadow-soft);
         transition: border-color .2s var(--ease-premium), transform .2s var(--ease-premium);
       }
-      .attn-card:hover { border-color: rgba(112,211,252,.35); transform: translateY(-2px); }
-      .attn-kicker { font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; }
-      .attn-title { font-size: 0.86rem; font-weight: 600; margin-top: 0.35rem; color: var(--text); }
-      .attn-note { font-size: 0.74rem; color: var(--muted); margin-top: 0.2rem; line-height: 1.5; }
+      .attn-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-elevated); }
+      .attn-kicker { font-size: var(--fs-micro); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+      .attn-title { font-size: var(--fs-emphasis); font-weight: 600; margin-top: var(--sp-2); color: var(--text); }
+      .attn-note { font-size: var(--fs-meta); color: var(--muted); margin-top: var(--sp-1); line-height: 1.5; }
 
       /* --- Dashed empty state --- */
       .dashed-empty {
         border: 1px dashed var(--line-strong); border-radius: var(--radius); padding: 1.1rem 1.2rem;
       }
       .dashed-empty .dashed-title {
-        font-family: Orbitron, Inter, sans-serif; font-size: 0.78rem; font-weight: 600;
+        font-family: Inter, sans-serif; font-size: var(--fs-meta); font-weight: 700;
         letter-spacing: 0.1em; text-transform: uppercase; color: var(--text);
       }
-      .dashed-empty p { font-size: 0.78rem; color: var(--muted); margin: 0.4rem 0 0; line-height: 1.6; }
+      .dashed-empty p { font-size: var(--fs-meta); color: var(--muted); margin: 0.4rem 0 0; line-height: 1.6; }
 
       /* --- Source chips row (prospecção) --- */
       .source-chip-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0 0.2rem; }
@@ -724,30 +752,30 @@
       }
       .campaign-card:hover { border-color: rgba(112,211,252,.35); transform: translateY(-2px); box-shadow: var(--shadow-elevated); }
       .campaign-card .head { display: flex; align-items: center; gap: 0.5rem; }
-      .campaign-card .head .name { font-size: 0.88rem; font-weight: 600; flex: 1; min-width: 0; }
-      .campaign-card .scope { font-size: 0.74rem; color: var(--muted); margin-top: 0.3rem; }
+      .campaign-card .head .name { font-size: var(--fs-emphasis); font-weight: 600; flex: 1; min-width: 0; }
+      .campaign-card .scope { font-size: var(--fs-meta); color: var(--muted); margin-top: 0.3rem; }
       .campaign-card .metrics {
         display: flex; gap: 1.1rem; margin-top: 0.8rem; padding-top: 0.7rem; border-top: 1px solid var(--line);
       }
-      .campaign-card .metrics .m-label { font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--weak); }
-      .campaign-card .metrics .m-val { font-family: "JetBrains Mono", monospace; font-size: 0.9rem; margin-top: 0.15rem; color: var(--text); }
+      .campaign-card .metrics .m-label { font-size: var(--fs-micro); letter-spacing: 0.1em; text-transform: uppercase; color: var(--weak); }
+      .campaign-card .metrics .m-val { font-family: "JetBrains Mono", monospace; font-size: var(--fs-emphasis); margin-top: 0.15rem; color: var(--text); }
 
       /* --- Detail cards grid (empresas) --- */
       .detail-card, .st-key-cnpj_card, .st-key-delete_card, .st-key-detalhe_empresa_card,
       .st-key-criar_equipe_card, .st-key-criar_usuario_card {
         background: linear-gradient(155deg, var(--panel), var(--panel-strong)); border: 1px solid var(--line);
-        border-radius: var(--radius); padding: 1.1rem 1.2rem; height: 100%; box-shadow: var(--shadow-soft);
+        border-radius: var(--radius); padding: var(--sp-4) var(--sp-5); height: 100%; box-shadow: var(--shadow-soft);
       }
       .detail-card.danger-card, .st-key-delete_card { border-color: rgba(255,107,107,.2); }
       .detail-card h4, .card-title {
-        margin: 0; font-family: Orbitron, Inter, sans-serif; font-size: 0.76rem; font-weight: 600;
+        margin: 0; font-family: Inter, sans-serif; font-size: var(--fs-meta); font-weight: 700;
         letter-spacing: 0.1em; text-transform: uppercase; color: var(--text);
       }
       .detail-card.danger-card h4, .card-title.danger { color: var(--danger); }
-      .detail-card p, .card-note { font-size: 0.74rem; color: var(--muted); margin: 0.4rem 0 0.7rem; }
+      .detail-card p, .card-note { font-size: var(--fs-meta); color: var(--muted); margin: 0.4rem 0 0.7rem; }
 
-      .detail-label { font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--weak); }
-      .detail-value { font-size: 0.82rem; margin-top: 0.15rem; color: var(--text-secondary); }
+      .detail-label { font-size: var(--fs-micro); letter-spacing: 0.14em; text-transform: uppercase; color: var(--weak); }
+      .detail-value { font-size: var(--fs-body); margin-top: 0.15rem; color: var(--text-secondary); }
       .detail-item { margin-bottom: 0.55rem; }
 
       /* --- Streamlit dialog (delete confirmation) --- */
@@ -770,7 +798,7 @@
           }
           .login-eyebrow {
             color: var(--primary);
-            font-size: 0.7rem;
+            font-size: var(--fs-micro);
             font-weight: 600;
             letter-spacing: 0.32em;
             text-transform: uppercase;
@@ -785,7 +813,7 @@
           }
           .login-sub {
             color: var(--muted);
-            font-size: 0.8rem;
+            font-size: var(--fs-body);
             text-align: center;
             margin-bottom: 1.6rem;
           }
@@ -808,19 +836,19 @@
       }
       .empty-state .empty-icon { font-size: 1.7rem; margin-bottom: 0.5rem; opacity: 0.85; }
       .empty-state .empty-title {
-        font-family: Orbitron, Inter, sans-serif; font-size: 0.86rem; font-weight: 600;
-        letter-spacing: 0.08em; text-transform: uppercase; color: var(--text);
+        font-family: Inter, sans-serif; font-size: var(--fs-meta); font-weight: 700;
+        letter-spacing: 0.1em; text-transform: uppercase; color: var(--text);
       }
       .empty-state .empty-desc {
-        font-size: 0.8rem; color: var(--muted); margin: 0.4rem auto 0; max-width: 30rem; line-height: 1.6;
+        font-size: var(--fs-body); color: var(--muted); margin: 0.4rem auto 0; max-width: 30rem; line-height: 1.6;
       }
       .empty-state--compact {
         padding: 0.82rem 0.9rem;
         text-align: left;
       }
       .empty-state--compact .empty-icon { display: none; }
-      .empty-state--compact .empty-title { font-size: 0.69rem; letter-spacing: 0.06em; }
-      .empty-state--compact .empty-desc { margin: 0.25rem 0 0; font-size: 0.72rem; line-height: 1.5; }
+      .empty-state--compact .empty-title { font-size: var(--fs-micro); letter-spacing: 0.06em; }
+      .empty-state--compact .empty-desc { margin: 0.25rem 0 0; font-size: var(--fs-meta); line-height: 1.5; }
       [class*="st-key-empty_actions_"] { margin: 0.72rem auto 0; }
 
       /* --- Status semânticos compartilhados --- */
@@ -832,7 +860,7 @@
         border: 1px solid var(--line-strong);
         border-radius: 999px;
         color: var(--text-secondary);
-        font-size: 0.62rem;
+        font-size: var(--fs-micro);
         font-weight: 600;
         white-space: nowrap;
       }
@@ -851,10 +879,10 @@
       /* --- Indicador de status inline (worker, badges de texto) --- */
       .status-inline {
         display: inline-flex; align-items: center; gap: 0.45rem;
-        font-size: 0.78rem; color: var(--muted);
+        font-size: var(--fs-meta); color: var(--muted);
       }
-      .status-inline .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); flex: none; animation: scorp-pulse 2.2s infinite; }
-      .status-inline .dot.off { background: var(--weak); animation: none; }
+      .status-inline .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); flex: none; }
+      .status-inline .dot.off { background: var(--weak); }
 
       /* --- Linha de usuário (Equipe) --- */
       .user-row {
@@ -862,8 +890,8 @@
         border-bottom: 1px solid var(--line);
       }
       .user-row:last-child { border-bottom: none; }
-      .user-row .u-name { font-size: 0.84rem; font-weight: 600; color: var(--text); }
-      .user-row .u-handle { font-size: 0.72rem; color: var(--weak); }
+      .user-row .u-name { font-size: var(--fs-emphasis); font-weight: 600; color: var(--text); }
+      .user-row .u-handle { font-size: var(--fs-meta); color: var(--weak); }
       [class*="st-key-user_row_"] {
         padding: 0.38rem 0.2rem;
         border-top: 1px solid var(--line);
@@ -876,11 +904,16 @@
         border-radius: var(--radius); padding: 0.9rem 1.1rem; box-shadow: var(--shadow-soft);
       }
       .team-card .t-name {
-        font-family: Orbitron, Inter, sans-serif; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.06em; color: var(--text);
+        font-family: Inter, sans-serif; font-size: var(--fs-emphasis); font-weight: 700; letter-spacing: 0; color: var(--text);
       }
-      .team-card .t-meta { font-size: 0.74rem; color: var(--muted); margin-top: 0.35rem; }
+      .team-card .t-meta { font-size: var(--fs-meta); color: var(--muted); margin-top: 0.35rem; }
 
-      @media (max-height: 800px) and (min-width: 900px) {
+      /* Scroll próprio por coluna do Kanban -- sem isso, colunas vazias
+         (ex.: Vistoria Técnica) ficam com área enorme em branco enquanto a
+         coluna cheia (Novos Leads) obriga a rolar a página inteira.
+         Restrito a min-width: 900px porque em mobile as colunas empilham
+         (viram largura total) e faz mais sentido rolar a página toda. */
+      @media (min-width: 900px) {
         [class*="st-key-kanban_stage_"] {
           max-height: calc(100vh - 215px);
           overflow-y: auto;
@@ -908,4 +941,47 @@
         [class*="st-key-empty_actions_"] .stButton > button { width: 100%; }
         .sales-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .st-key-login_card { margin-top: 4vh; padding: 1.6rem 1.25rem 1.35rem; }
+      }
+
+      /* --- Botão de ação destrutiva: prefixar a key com "danger_" já
+         estiliza o botão sem precisar tocar CSS por botão (Excluir,
+         Desativar, Não contatar mais, Ignorar...). Usa a própria --danger do
+         tema em vez de um vermelho genérico novo. */
+      [class*="st-key-danger_"] button {
+        border-color: var(--danger) !important;
+        color: var(--danger) !important;
+      }
+      [class*="st-key-danger_"] button:hover {
+        background: rgba(255, 102, 125, 0.12) !important;
+        border-color: var(--danger) !important;
+        color: var(--danger-strong) !important;
+      }
+
+      /* --- Trilha do slider (ex.: "Score mínimo" do Radar) -- a trilha
+         padrão (rgb(59,59,59)) é pouco visível no tema escuro. Confirmado
+         via devtools que esta versão do Streamlit usa um <input
+         type="range"> nativo (React Aria), não o <div data-baseweb="slider">
+         de versões antigas baseadas em BaseWeb -- o seletor precisa mirar o
+         input e seus pseudo-elementos de trilha diretamente. */
+      [data-testid="stSlider"] input[type="range"] {
+        background: var(--muted) !important;
+      }
+      [data-testid="stSlider"] input[type="range"]::-webkit-slider-runnable-track {
+        background: var(--muted) !important;
+      }
+      [data-testid="stSlider"] input[type="range"]::-moz-range-track {
+        background: var(--muted) !important;
+      }
+
+      /* --- Nome de empresa truncado com reticências + tooltip nativo (via
+         atributo title no elemento) -- evita tanto estourar a altura do
+         card (Kanban) quanto cortar no meio de uma palavra sem nenhum jeito
+         de ver o nome completo. */
+      .kanban-company,
+      .nome-truncado {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+        display: block;
       }
