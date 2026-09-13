@@ -1558,6 +1558,16 @@ def _valor_para_str_canonico(valor: Any, tipo: str = "str") -> str:
     return str(valor).strip()
 
 
+def _neutralizar_formula_csv(valor: Any) -> Any:
+    """Evita injeção de fórmula ao abrir o CSV exportado no Excel/Sheets: um
+    campo de texto livre (nome da empresa, observações...) que comece com
+    =, +, - ou @ seria interpretado como fórmula/DDE pela planilha. O apóstrofo
+    na frente faz essas ferramentas tratarem o valor como texto puro."""
+    if isinstance(valor, str) and valor[:1] in ("=", "+", "-", "@"):
+        return "'" + valor
+    return valor
+
+
 def atualizar_leads(editado: pd.DataFrame, original: pd.DataFrame) -> int:
     campos = [
         "nome_empresa", "razao_social", "decisor", "nicho", "endereco", "cidade",
@@ -1830,7 +1840,7 @@ def _render_kanban_card(lead: pd.Series, etapa_atual: str) -> None:
         # meio do <div>, e o restante passa a ser exibido como texto cru.
         st.markdown(
             f"""
-            <div class="kanban-card">
+            <div class="kanban-card {score_classe}">
               <div class="kanban-topline">
                 <div class="kanban-company" title="{escape(str(lead['nome_empresa']))}">{escape(str(lead['nome_empresa']))}</div>
                 <div class="score-badge {score_classe}">{score_str}</div>
@@ -2161,11 +2171,16 @@ if aba_dashboard:
 
     st.markdown(
         """
+        <div class="kpi-hero">
+          <span class="label">Valor em pipeline</span>
+          <strong>R$ {:,.0f}</strong>
+          <span class="note">negócios em etapas ativas</span>
+        </div>
         <div class="sales-summary">
-          <div class="sales-summary__item accent">
-            <span class="label">Leads</span>
+          <div class="sales-summary__item">
+            <span class="label">Leads na base</span>
             <strong>{}</strong>
-            <span class="note" style="color:#7DD3FC">+{} este mês</span>
+            <span class="note">+{} este mês</span>
           </div>
           <div class="sales-summary__item">
             <span class="label">Novos</span>
@@ -2180,22 +2195,18 @@ if aba_dashboard:
           <div class="sales-summary__item">
             <span class="label">Propostas</span>
             <strong>{}</strong>
-            <span class="note" style="color:#7DD3FC">R$ {:,.0f} em jogo</span>
+            <span class="note">R$ {:,.0f} em jogo</span>
           </div>
           <div class="sales-summary__item">
             <span class="label">Conversão</span>
             <strong>{:.1f}%</strong>
             <span class="note">{} fechado(s)</span>
           </div>
-          <div class="sales-summary__item accent">
-            <span class="label">Valor em pipeline</span>
-            <strong>R$ {:,.0f}</strong>
-            <span class="note">negócios em etapas ativas</span>
-          </div>
         </div>
         """.format(
+            valor_pipeline,
             total, novos_no_mes, novos, em_andamento, propostas, propostas, valor_propostas,
-            conversao, fechados, valor_pipeline,
+            conversao, fechados,
         ),
         unsafe_allow_html=True,
     )
@@ -2224,7 +2235,7 @@ if aba_dashboard:
         with col_funil:
             with st.container(key="dash_funil_card"):
                 st.markdown(
-                    '<h3 style="margin:0;font-family:Orbitron,sans-serif;font-size:0.85rem;font-weight:600;'
+                    '<h3 style="margin:0;font-family:Inter,sans-serif;font-size:0.85rem;font-weight:700;'
                     'letter-spacing:0.12em;text-transform:uppercase;color:#F5F7FA;">Funil comercial</h3>'
                     '<div style="font-size:0.7rem;color:#5A6373;margin-top:0.2rem;">visão geral do pipeline ativo</div>',
                     unsafe_allow_html=True,
@@ -2246,7 +2257,7 @@ if aba_dashboard:
         with col_icp:
             with st.container(key="dash_icp_card"):
                 st.markdown(
-                    '<h3 style="margin:0;font-family:Orbitron,sans-serif;font-size:0.85rem;font-weight:600;'
+                    '<h3 style="margin:0;font-family:Inter,sans-serif;font-size:0.85rem;font-weight:700;'
                     'letter-spacing:0.12em;text-transform:uppercase;color:#F5F7FA;">ICP por segmento</h3>',
                     unsafe_allow_html=True,
                 )
@@ -2318,7 +2329,7 @@ if aba_dashboard:
                     with _coluna_radar:
                         st.markdown(
                             f"""
-                            <div class="attn-card">
+                            <div class="attn-card" style="border-left-color:{_cores_nivel.get(_nivel_op, '#8A94A6')}">
                               <div class="attn-kicker" style="color:{_cores_nivel.get(_nivel_op, '#8A94A6')}">{escape(_nivel_op)} · SCORE {_score_op}{_delta_txt}</div>
                               <div class="attn-title">{escape(str(_op.get('nome_empresa') or '—'))}</div>
                               <div class="attn-note">{escape(_why) if _why else 'Sem sinal comercial ativo ainda — monitorando.'}</div>
@@ -2395,7 +2406,7 @@ if aba_dashboard:
                 with coluna:
                     st.markdown(
                         f"""
-                        <div class="attn-card">
+                        <div class="attn-card" style="border-left-color:{cor}">
                           <div class="attn-kicker" style="color:{cor}">{escape(kicker)}</div>
                           <div class="attn-title">{escape(titulo)}</div>
                           <div class="attn-note">{escape(nota)}</div>
@@ -2935,7 +2946,7 @@ if aba_prospeccao:
 def _confirmar_exclusao_campanha(campanha_id: int, nome: str) -> None:
     st.markdown(
         f'<p style="font-size:0.82rem;color:#C3CBD8;line-height:1.65;margin:0 0 0.2rem;">'
-        f'A campanha "{nome}" e seu histórico de execuções serão removidos. '
+        f'A campanha "{escape(nome)}" e seu histórico de execuções serão removidos. '
         f'Os leads já capturados permanecem na base.</p>',
         unsafe_allow_html=True,
     )
@@ -3213,8 +3224,8 @@ if aba_automacao:
 def _confirmar_exclusao_lead(lead_id: int, nome: str, cidade: str, etapa: str) -> None:
     st.markdown(
         f'<p style="font-size:0.82rem;color:#C3CBD8;line-height:1.65;margin:0 0 0.2rem;">'
-        f'Você vai excluir <strong>{nome}</strong> (#{lead_id} · {cidade or "—"}), hoje em {etapa}. '
-        f'Esta ação não pode ser desfeita.</p>',
+        f'Você vai excluir <strong>{escape(nome)}</strong> (#{lead_id} · {escape(str(cidade)) if cidade else "—"}), '
+        f'hoje em {escape(etapa)}. Esta ação não pode ser desfeita.</p>',
         unsafe_allow_html=True,
     )
     digitado = st.text_input("Digite o nome da empresa para confirmar", key="digitado_exclusao_lead")
@@ -3453,7 +3464,12 @@ if aba_base:
                 )
                 render_perfil_empresa_receita(int(linha_detalhe["id"]))
 
-        csv_data = base.to_csv(index=False).encode("utf-8")
+        base_export = base.copy()
+        colunas_texto_csv = base_export.select_dtypes(include="object").columns
+        base_export[colunas_texto_csv] = base_export[colunas_texto_csv].apply(
+            lambda coluna: coluna.map(_neutralizar_formula_csv)
+        )
+        csv_data = base_export.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="Exportar visão atual para CSV",
             data=csv_data,

@@ -2,6 +2,7 @@
 .venv/
 .venv-1/
 .venv-2/
+.venv-3/
 __pycache__/
 *.pyc
 
@@ -25,6 +26,13 @@ scorpions_base_legacy_backup.db
 
 # Arquivos externos baixados p/ analise (alvaras SP, samples de dados publicos)
 dados_externos/
+
+# Exports/dumps com dados reais de leads e empresas (LGPD) -- não versionar
+leads_cnes_sp.csv
+alvaras.geojson
+alvaras.gpkg
+alvaras.parquet
+alvaras/
 
 # Logs
 *.log
