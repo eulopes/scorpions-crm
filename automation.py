@@ -496,6 +496,18 @@ def telefone_suprimido(telefone: str) -> bool:
     return linha is not None
 
 
+def listar_telefones_suprimidos() -> set[str]:
+    """Todos os telefones (já normalizados) na lista de supressão, numa
+    query só -- para checar pertencimento em memória (O(1) por lead) em vez
+    de uma conexão + query por lead via telefone_suprimido(). Necessário
+    desde que a base passou a ter dezenas de milhares de leads (CNES): o
+    padrão anterior -- uma chamada de telefone_suprimido() por linha dentro
+    de um loop sobre toda a base -- travava a tela de Contato nesse volume."""
+    with conectar() as conexao:
+        linhas = conexao.execute("SELECT telefone FROM lista_supressao_contato").fetchall()
+    return {linha["telefone"] for linha in linhas}
+
+
 def adicionar_supressao(telefone: str, motivo: str, usuario: str) -> None:
     digitos = _normalizar_telefone(telefone)
     if not digitos:

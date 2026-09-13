@@ -86,13 +86,14 @@ from automation import (
     status_worker,
     ler_config,
     salvar_config,
-    telefone_suprimido,
+    listar_telefones_suprimidos,
     adicionar_supressao,
     remover_supressao,
     listar_supressao,
     registrar_mensagem_enviada,
     leads_ja_contatados_ha_dias,
     gerar_link_whatsapp,
+    _normalizar_telefone,
 )
 from opportunity_engine import (
     NIVEIS_OPORTUNIDADE,
@@ -1699,6 +1700,11 @@ MOTIVOS_DESCARTE = (
     "Não é decisor", "Sem retorno", "Fora do escopo", "Outro",
 )
 LIMITE_DIAS_VISTORIA_LENTA = 3
+# Cards renderizados por coluna do Kanban -- sem isso, uma etapa com muitos
+# milhares de leads (ex.: "Novos Leads" após uma carga em massa do CNES)
+# tentaria montar um card HTML por lead de uma vez, travando o navegador.
+# Sempre os de maior pontuação primeiro (mais relevantes ficam visíveis).
+LIMITE_CARDS_KANBAN_POR_ETAPA = 50
 
 
 def atualizar_etapa_funil(lead_id: int, nova_etapa: str, motivo_descarte: str | None = None):
@@ -2680,10 +2686,17 @@ if aba_funil:
                         _empty_desc,
                         compacto=True,
                     )
-                for _, lead in leads_na_etapa.sort_values(
+                _leads_etapa_ordenados = leads_na_etapa.sort_values(
                     "pontuacao", ascending=False, na_position="last"
-                ).iterrows():
+                )
+                for _, lead in _leads_etapa_ordenados.head(LIMITE_CARDS_KANBAN_POR_ETAPA).iterrows():
                     _render_kanban_card(lead, etapa)
+                _restantes_etapa = len(_leads_etapa_ordenados) - LIMITE_CARDS_KANBAN_POR_ETAPA
+                if _restantes_etapa > 0:
+                    st.caption(
+                        f"+ {_restantes_etapa} outra(s) empresa(s) nesta etapa — "
+                        "use o Radar ou a busca em Clientes/Empresas para ver o restante."
+                    )
 
     _fechados_df = dados_funil[dados_funil["status"] == "Fechado / Contrato"]
     _descartados_df = dados_funil[dados_funil["status"] == "Descartado"]
@@ -3553,14 +3566,18 @@ if aba_contato:
 
     _base_contato = leads_visiveis()
     _contatados_recentes = leads_ja_contatados_ha_dias(14)
+    # Uma query só para toda a lista de supressão, e filtro vetorizado por
+    # telefone preenchido antes do loop -- com a base na casa de dezenas de
+    # milhares de leads (CNES), uma chamada a telefone_suprimido() (que abre
+    # conexão + faz query) por linha dentro do .iterrows() travava a tela
+    # inteira a cada rerun.
+    _telefones_suprimidos = listar_telefones_suprimidos()
+    _com_telefone = _base_contato[_base_contato["telefone"].fillna("").astype(str).str.strip() != ""]
     _elegiveis = []
-    for _, _linha in _base_contato.iterrows():
-        _telefone = str(_linha.get("telefone") or "").strip()
-        if not _telefone:
-            continue
+    for _, _linha in _com_telefone.iterrows():
         if int(_linha["id"]) in _contatados_recentes:
             continue
-        if telefone_suprimido(_telefone):
+        if _normalizar_telefone(_linha["telefone"]) in _telefones_suprimidos:
             continue
         _elegiveis.append(_linha)
 

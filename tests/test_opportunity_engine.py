@@ -525,5 +525,36 @@ class RecommendServiceTest(unittest.TestCase):
         self.assertIsNone(recommend_service("Clínicas, Hospitais & Laboratórios", sinais))
 
 
+class ListarTelefonesSuprimidosTest(unittest.TestCase):
+    """Bug real de performance: a tela de Contato chamava
+    automation.telefone_suprimido() (abre conexão + query) uma vez por lead
+    dentro de um loop sobre a base inteira -- imperceptível com dezenas de
+    leads, mas travava a tela assim que a base passou a ter dezenas de
+    milhares (carga do CNES). listar_telefones_suprimidos() troca isso por
+    uma query só, para checagem em memória."""
+
+    def setUp(self):
+        with automation.conectar() as conexao:
+            conexao.execute("DELETE FROM lista_supressao_contato")
+
+    def test_devolve_todos_os_telefones_normalizados(self):
+        automation.adicionar_supressao("(11) 90000-0000", "Pediu para sair", "teste")
+        automation.adicionar_supressao("11 4000-1111", "Numero fixo", "teste")
+        suprimidos = automation.listar_telefones_suprimidos()
+        self.assertIn("11900000000", suprimidos)
+        self.assertIn("1140001111", suprimidos)
+
+    def test_lista_vazia_sem_supressao_nenhuma(self):
+        self.assertEqual(automation.listar_telefones_suprimidos(), set())
+
+    def test_bate_com_telefone_suprimido_individual(self):
+        automation.adicionar_supressao("(19) 3000-9999", "Motivo qualquer", "teste")
+        suprimidos = automation.listar_telefones_suprimidos()
+        self.assertTrue(automation.telefone_suprimido("(19) 3000-9999"))
+        self.assertIn("1930009999", suprimidos)
+        self.assertFalse(automation.telefone_suprimido("(19) 3000-0000"))
+        self.assertNotIn("1930000000", suprimidos)
+
+
 if __name__ == "__main__":
     unittest.main()
