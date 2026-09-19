@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap">
+<style>
+@keyframes skel { 0% { opacity: .25 } 50% { opacity: .6 } 100% { opacity: .25 } }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(125,211,252,.5) } 100% { box-shadow: 0 0 0 7px rgba(125,211,252,0) } }
+@keyframes fade { from { opacity: 0; transform: translateY(5px) } to { opacity: 1; transform: none } }
+@keyframes trace { 0% { transform: translateX(-100%) } 100% { transform: translateX(300%) } }
+body { margin: 0; background: #0A0A0F; color: #F5F7FA; font-family: Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased }
+a { color: #7DD3FC; text-decoration: none }
+a:hover { color: #BDE9FF }
+::selection { background: rgba(37,104,255,.35) }
+input, select, textarea, button { font-family: inherit }
+:focus-visible { outline: 1px solid #7DD3FC; outline-offset: 2px }
+input::placeholder, textarea::placeholder { color: #5A6373 }
+::-webkit-scrollbar { width: 10px; height: 10px }
+::-webkit-scrollbar-thumb { background: #2D333D; border-radius: 999px }
+::-webkit-scrollbar-track { background: #0A0A0F }
+</style>
+</helmet>
+<div style="display:flex;min-height:100vh;background:radial-gradient(circle at 78% 0%, rgba(37,104,255,.10), transparent 42%), #0A0A0F">
+
+  <aside style="width:252px;flex:none;background:#0A0A0F;border-right:1px solid #1E232B;display:flex;flex-direction:column;gap:20px;padding:20px 0;position:sticky;top:0;height:100vh">
+    <div style="padding:0 18px;display:flex;align-items:center;gap:11px">
+      <img src="uploads/logo%201.jpeg" alt="Scorpions" style="width:38px;height:38px;object-fit:cover;object-position:center 34%;border:1px solid #1E232B;border-radius:8px;filter:brightness(1.35) contrast(1.1)">
+      <div>
+        <div style="font-family:Orbitron,sans-serif;font-weight:700;font-size:14px;letter-spacing:.2em;color:#F5F7FA">SCORPIONS</div>
+        <div style="font-size:9.5px;color:#7DD3FC;letter-spacing:.22em;text-transform:uppercase">Soluções tecnológicas</div>
+      </div>
+    </div>
+
+    <div style="padding:0 14px">
+      <div style="display:flex;align-items:center;gap:9px;background:#111319;border:1px solid rgba(125,211,252,.18);border-radius:4px;padding:8px 11px">
+        <span style="color:#5A6373;font-size:13px">⌕</span>
+        <input onInput="{{ setQuery }}" placeholder="Buscar empresa, CNPJ…" style="flex:1;min-width:0;background:transparent;border:0;color:#F5F7FA;font-size:12.5px;outline:none">
+        <span style="font-size:9.5px;color:#5A6373;border:1px solid #2D333D;border-radius:3px;padding:1px 5px;letter-spacing:.06em">⌘K</span>
+      </div>
+    </div>
+
+    <nav style="display:flex;flex-direction:column;gap:1px;padding:0 10px">
+      <div style="font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;color:#5A6373;padding:6px 8px">Workspace</div>
+      <sc-for list="{{ nav }}" as="item" hint-placeholder-count="6">
+        <button onClick="{{ item.go }}" style="{{ item.style }}" style-hover="background:#111319;color:#F5F7FA">
+          <span style="width:15px;flex:none;text-align:center;font-size:12px;opacity:.85">{{ item.icon }}</span>
+          <span style="flex:1;text-align:left;letter-spacing:.01em">{{ item.label }}</span>
+          <sc-if value="{{ item.count }}" hint-placeholder-val="{{ false }}">
+            <span style="font-size:9.5px;color:#8A94A6;border:1px solid #2D333D;border-radius:999px;padding:1px 7px">{{ item.count }}</span>
+          </sc-if>
+        </button>
+      </sc-for>
+    </nav>
+
+    <div style="margin-top:auto;padding:0 18px;display:flex;flex-direction:column;gap:11px">
+      <div style="height:1px;background:linear-gradient(90deg,rgba(125,211,252,.3),transparent)"></div>
+      <div style="display:flex;align-items:center;gap:8px;font-size:11.5px;color:#8A94A6">
+        <span style="width:6px;height:6px;border-radius:50%;background:#7DD3FC;animation:pulse 2.2s infinite"></span>
+        Worker online · v1.1
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="width:28px;height:28px;border-radius:4px;border:1px solid #2D333D;background:#111319;color:#7DD3FC;display:grid;place-items:center;font-size:11px;font-weight:600">AD</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:500">admin</div>
+          <div style="font-size:10.5px;color:#5A6373">Comercial</div>
+        </div>
+        <button style="background:transparent;border:1px solid #2D333D;color:#8A94A6;border-radius:4px;padding:5px 9px;font-size:10.5px;cursor:pointer;letter-spacing:.06em" style-hover="border-color:#7DD3FC;color:#F5F7FA">SAIR</button>
+      </div>
+    </div>
+  </aside>
+
+  <main style="flex:1;min-width:0;display:flex;flex-direction:column">
+    <header style="display:flex;align-items:center;gap:18px;padding:17px 26px;border-bottom:1px solid #1E232B;background:rgba(10,10,15,.86);position:sticky;top:0;backdrop-filter:blur(10px);z-index:5">
+      <div style="min-width:0">
+        <div style="display:flex;align-items:center;gap:10px">
+          <h1 style="font-family:Orbitron,sans-serif;font-size:19px;font-weight:600;margin:0;letter-spacing:.06em;text-transform:uppercase">{{ title }}</h1>
+          <span style="font-size:10px;color:#7DD3FC;border:1px solid rgba(125,211,252,.28);border-radius:3px;padding:2px 8px;letter-spacing:.1em;text-transform:uppercase">{{ badge }}</span>
+        </div>
+        <div style="font-size:12px;color:#8A94A6;margin-top:3px">{{ subtitle }}</div>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:9px;align-items:center;flex:none">
+        <button onClick="{{ goProsp }}" style="background:rgba(37,104,255,.07);border:1px solid rgba(125,211,252,.3);color:#F5F7FA;border-radius:4px;padding:9px 14px;font-size:12.5px;cursor:pointer;letter-spacing:.02em" style-hover="border-color:#7DD3FC;background:rgba(37,104,255,.16)">Prospectar</button>
+        <button onClick="{{ goNova }}" style="background:linear-gradient(90deg,#0D6EFD,#2568FF);border:1px solid rgba(125,211,252,.45);color:#fff;border-radius:4px;padding:9px 15px;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:0 0 22px rgba(37,104,255,.28)" style-hover="filter:brightness(1.12)">+ Nova empresa</button>
+      </div>
+    </header>
+
+    <sc-if value="{{ isDash }}" hint-placeholder-val="{{ true }}">
+      <div style="padding:22px 26px 48px;display:flex;flex-direction:column;gap:20px;animation:fade .25s ease">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:11px">
+          <sc-for list="{{ kpis }}" as="k" hint-placeholder-count="6">
+            <div style="position:relative;overflow:hidden;background:linear-gradient(180deg,#111319,#0C0E13);border:1px solid #1E232B;border-radius:4px;padding:14px 15px" style-hover="border-color:rgba(125,211,252,.35)">
+              <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(125,211,252,.45),transparent)"></div>
+              <div style="font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373">{{ k.label }}</div>
+              <div style="font-family:Orbitron,sans-serif;font-size:25px;font-weight:600;margin-top:8px;letter-spacing:.01em">{{ k.value }}</div>
+              <div style="font-size:11px;color:{{ k.color }};margin-top:3px">{{ k.note }}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1.25fr 1fr;gap:14px">
+          <section style="background:#111319;border:1px solid #1E232B;border-radius:4px;padding:18px">
+            <div style="display:flex;align-items:baseline;gap:10px">
+              <h3 style="margin:0;font-family:Orbitron,sans-serif;font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase">Funil comercial</h3>
+              <span style="font-size:10.5px;color:#5A6373">últimos 30 dias</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:14px;margin-top:18px">
+              <sc-for list="{{ stageBars }}" as="s" hint-placeholder-count="4">
+                <div>
+                  <div style="display:flex;justify-content:space-between;font-size:12px;color:#8A94A6">
+                    <span>{{ s.name }}</span>
+                    <span style="color:#F5F7FA">{{ s.count }} <span style="color:#5A6373">·</span> {{ s.value }}</span>
+                  </div>
+                  <div style="height:6px;background:#1E232B;border-radius:999px;margin-top:7px;overflow:hidden">
+                    <div style="{{ s.barStyle }}"></div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </section>
+
+          <section style="background:#111319;border:1px solid #1E232B;border-radius:4px;padding:18px">
+            <h3 style="margin:0 0 15px;font-family:Orbitron,sans-serif;font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase">ICP por segmento</h3>
+            <div style="display:flex;flex-direction:column;gap:11px">
+              <sc-for list="{{ icpRows }}" as="r" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;gap:10px;font-size:12.5px">
+                  <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#F5F7FA">{{ r.name }}</span>
+                  <span style="font-size:11.5px;color:#8A94A6">{{ r.leads }} leads</span>
+                  <span style="{{ r.chip }}">{{ r.score }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="margin-top:16px;background:rgba(37,104,255,.06);border:1px solid rgba(125,211,252,.22);border-left:2px solid #7DD3FC;border-radius:3px;padding:12px 14px">
+              <div style="font-size:12.5px;font-weight:600;color:#7DD3FC">45 de 47 leads sem ICP</div>
+              <p style="font-size:11.5px;color:#8A94A6;margin:5px 0 10px;line-height:1.6">O scoring não segmenta sem CNPJ. Rode a consulta cadastral em lote para destravar o funil.</p>
+              <button onClick="{{ goClientes }}" style="background:transparent;border:1px solid rgba(125,211,252,.35);color:#7DD3FC;border-radius:3px;padding:6px 11px;font-size:11.5px;cursor:pointer" style-hover="background:rgba(37,104,255,.14)">Completar cadastros</button>
+            </div>
+          </section>
+        </div>
+
+        <section style="background:#111319;border:1px solid #1E232B;border-radius:4px;padding:18px">
+          <h3 style="margin:0 0 14px;font-family:Orbitron,sans-serif;font-size:13px;font-weight:600;letter-spacing:.14em;text-transform:uppercase">Precisa de atenção hoje</h3>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:11px">
+            <sc-for list="{{ tasks }}" as="t" hint-placeholder-count="3">
+              <div style="background:#0C0E13;border:1px solid #1E232B;border-radius:4px;padding:13px 14px" style-hover="border-color:rgba(125,211,252,.3)">
+                <div style="font-size:9.5px;color:{{ t.color }};letter-spacing:.16em;text-transform:uppercase">{{ t.kind }}</div>
+                <div style="font-size:13.5px;font-weight:600;margin-top:6px">{{ t.title }}</div>
+                <div style="font-size:11.5px;color:#8A94A6;margin-top:3px;line-height:1.5">{{ t.note }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </section>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isPipeline }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:20px 26px 48px;overflow-x:auto;animation:fade .25s ease">
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(268px,1fr));gap:12px">
+          <sc-for list="{{ stages }}" as="st" hint-placeholder-count="4">
+            <div style="background:#0C0E13;border:1px solid #1E232B;border-radius:4px;padding:13px;min-width:0">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="{{ st.dot }}"></span>
+                <div style="font-size:10.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:#F5F7FA;flex:1;min-width:0">{{ st.name }}</div>
+                <span style="font-family:Orbitron,sans-serif;font-size:11px;color:#8A94A6">{{ st.count }}</span>
+              </div>
+              <div style="font-size:10.5px;color:#5A6373;margin:5px 0 12px;letter-spacing:.02em">{{ st.value }}</div>
+              <div style="display:flex;flex-direction:column;gap:9px">
+                <sc-for list="{{ st.cards }}" as="c" hint-placeholder-count="2">
+                  <article style="background:#111319;border:1px solid #1E232B;border-radius:4px;padding:12px" style-hover="border-color:rgba(125,211,252,.4);box-shadow:0 0 20px rgba(37,104,255,.12)">
+                    <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+                      <div style="font-size:13.5px;font-weight:600;line-height:1.3">{{ c.nome }}</div>
+                      <span style="{{ c.scoreStyle }}">{{ c.score }}</span>
+                    </div>
+                    <div style="font-size:11px;color:#8A94A6;margin-top:6px">{{ c.cidade }} · {{ c.nicho }}</div>
+                    <div style="display:flex;align-items:center;gap:8px;margin-top:9px">
+                      <span style="{{ c.icpChip }}">{{ c.icp }}</span>
+                      <sc-if value="{{ c.valor }}" hint-placeholder-val="{{ false }}">
+                        <span style="font-family:Orbitron,sans-serif;font-size:10.5px;color:#7DD3FC;margin-left:auto">{{ c.valor }}</span>
+                      </sc-if>
+                    </div>
+                    <div style="display:flex;gap:6px;margin-top:11px;padding-top:10px;border-top:1px solid #1E232B">
+                      <select onChange="{{ c.move }}" style="flex:1;min-width:0;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;font-size:11px;padding:5px 6px;cursor:pointer">
+                        <sc-for list="{{ c.stageOpts }}" as="o" hint-placeholder-count="4">
+                          <option value="{{ o.value }}" selected="{{ o.selected }}">{{ o.label }}</option>
+                        </sc-for>
+                      </select>
+                      <button onClick="{{ c.open }}" style="background:transparent;border:1px solid #2D333D;color:#7DD3FC;border-radius:3px;font-size:11px;padding:5px 10px;cursor:pointer" style-hover="border-color:#7DD3FC">Abrir</button>
+                    </div>
+                  </article>
+                </sc-for>
+                <sc-if value="{{ st.empty }}" hint-placeholder-val="{{ false }}">
+                  <div style="border:1px dashed #2D333D;border-radius:4px;padding:18px 13px;font-size:11.5px;color:#5A6373;line-height:1.55">Nada nesta etapa. Mova um lead pelo seletor do cartão.</div>
+                </sc-if>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isProsp }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:22px 26px 48px;max-width:1080px;animation:fade .25s ease">
+        <div style="position:relative;overflow:hidden;background:#111319;border:1px solid #1E232B;border-radius:4px;padding:18px">
+          <div style="position:absolute;top:0;left:0;width:40%;height:1px;background:linear-gradient(90deg,transparent,#2568FF,#7DD3FC);animation:trace 4s linear infinite"></div>
+          <div style="display:grid;grid-template-columns:2fr 1.3fr 108px;gap:13px">
+            <label style="display:block"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Nicho ou segmento</span><input placeholder="Ex.: cooperativa de crédito — vazio busca todos" style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none"></label>
+            <label style="display:block"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Município, UF</span><input placeholder="Ex.: Campinas, SP" style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none"></label>
+            <label style="display:block"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Qtde</span><input value="8" style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none;font-family:Orbitron,sans-serif"></label>
+          </div>
+          <div style="display:grid;grid-template-columns:2fr 1.3fr 108px;gap:13px;margin-top:13px">
+            <label style="display:block"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Fonte</span>
+              <select style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;cursor:pointer">
+                <option>Automático por nicho</option><option>Google Places</option><option>OpenStreetMap</option><option>Bacen / CVM / B3</option>
+              </select>
+            </label>
+            <label style="display:block"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Score mínimo</span><input value="70" style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none;font-family:Orbitron,sans-serif"></label>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:14px">
+            <sc-for list="{{ sourceChips }}" as="s" hint-placeholder-count="4">
+              <span style="{{ s.style }}">{{ s.label }}</span>
+            </sc-for>
+          </div>
+          <div style="display:flex;gap:9px;margin-top:16px">
+            <button onClick="{{ runProspect }}" style="background:linear-gradient(90deg,#0D6EFD,#2568FF);border:1px solid rgba(125,211,252,.45);color:#fff;border-radius:4px;padding:10px 16px;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:0 0 22px rgba(37,104,255,.25)" style-hover="filter:brightness(1.12)">Encontrar oportunidades</button>
+            <button style="background:transparent;border:1px solid #2D333D;color:#F5F7FA;border-radius:4px;padding:10px 14px;font-size:12.5px;cursor:pointer" style-hover="border-color:#7DD3FC">Sugerir nicho por ICP</button>
+          </div>
+        </div>
+
+        <sc-if value="{{ prospIdle }}" hint-placeholder-val="{{ true }}">
+          <div style="margin-top:16px;border:1px dashed #2D333D;border-radius:4px;padding:28px">
+            <div style="font-family:Orbitron,sans-serif;font-size:13px;font-weight:600;letter-spacing:.12em;text-transform:uppercase">Nenhuma busca nesta sessão</div>
+            <p style="font-size:12.5px;color:#8A94A6;margin:8px 0 0;max-width:540px;line-height:1.65">A última execução (tecnologia · São Paulo, SP) trouxe 47 empresas — 12 entraram no pipeline e 4 eram duplicadas.</p>
+          </div>
+        </sc-if>
+        <sc-if value="{{ prospLoading }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:16px">
+            <div style="display:flex;align-items:center;gap:9px;font-size:12.5px;color:#8A94A6">
+              <span style="width:7px;height:7px;border-radius:50%;background:#7DD3FC;animation:skel 1s infinite"></span>
+              Consultando fontes públicas…
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px;margin-top:14px">
+              <sc-for list="{{ skeletons }}" as="s" hint-placeholder-count="5">
+                <div style="height:46px;background:#111319;border:1px solid #1E232B;border-radius:4px;animation:skel 1.3s infinite"></div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ prospDone }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:16px;animation:fade .3s ease">
+            <div style="display:flex;align-items:center;gap:10px">
+              <h3 style="margin:0;font-family:Orbitron,sans-serif;font-size:14px;font-weight:600;letter-spacing:.12em;text-transform:uppercase">8 oportunidades</h3>
+              <span style="font-size:10px;color:#7DD3FC;border:1px solid rgba(125,211,252,.28);border-radius:3px;padding:2px 8px;letter-spacing:.08em">6 acima do score mínimo</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px;margin-top:13px">
+              <sc-for list="{{ prospResults }}" as="r" hint-placeholder-count="6">
+                <div style="display:flex;align-items:center;gap:14px;background:#111319;border:1px solid #1E232B;border-radius:4px;padding:11px 14px" style-hover="border-color:rgba(125,211,252,.35)">
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:13px;font-weight:600">{{ r.nome }}</div>
+                    <div style="font-size:11px;color:#8A94A6">{{ r.cidade }} · {{ r.fonte }}</div>
+                  </div>
+                  <span style="{{ r.scoreStyle }}">{{ r.score }}</span>
+                  <button style="background:transparent;border:1px solid #2D333D;color:#7DD3FC;border-radius:3px;padding:6px 11px;font-size:11.5px;cursor:pointer;white-space:nowrap" style-hover="border-color:#7DD3FC">Enviar ao pipeline</button>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isClientes }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:20px 26px 48px;min-width:0;animation:fade .25s ease">
+        <div style="display:flex;gap:11px;align-items:flex-end;flex-wrap:wrap">
+          <label style="flex:1;min-width:210px"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Pesquisar na base</span><input onInput="{{ setQuery }}" value="{{ query }}" placeholder="Empresa, cidade ou CNPJ" style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none"></label>
+          <label style="width:155px"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Nicho</span>
+            <select onChange="{{ setNicho }}" style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;cursor:pointer">
+              <sc-for list="{{ nichoOpts }}" as="o" hint-placeholder-count="3"><option>{{ o }}</option></sc-for>
+            </select>
+          </label>
+          <label style="width:185px"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Etapa</span>
+            <select onChange="{{ setStatus }}" style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;cursor:pointer">
+              <sc-for list="{{ statusOpts }}" as="o" hint-placeholder-count="3"><option>{{ o }}</option></sc-for>
+            </select>
+          </label>
+          <div style="display:flex;gap:2px;background:#0A0A0F;border:1px solid #2D333D;border-radius:3px;padding:3px">
+            <button onClick="{{ setCozy }}" style="{{ cozyStyle }}">Confortável</button>
+            <button onClick="{{ setTight }}" style="{{ tightStyle }}">Compacta</button>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:10px;margin-top:18px">
+          <div style="font-family:Orbitron,sans-serif;font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase">{{ resultLabel }}</div>
+          <div style="font-size:11px;color:#5A6373">clique na linha para ver CNPJ, decisor, endereço e serviços</div>
+          <button onClick="{{ reload }}" style="margin-left:auto;background:transparent;border:1px solid #2D333D;color:#8A94A6;border-radius:3px;padding:6px 11px;font-size:11.5px;cursor:pointer" style-hover="border-color:#7DD3FC;color:#F5F7FA">Recarregar base</button>
+        </div>
+
+        <sc-if value="{{ tableLoading }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:12px">
+            <sc-for list="{{ skeletons }}" as="s" hint-placeholder-count="7">
+              <div style="height:44px;background:#111319;border:1px solid #1E232B;border-radius:4px;animation:skel 1.3s infinite"></div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ tableReady }}" hint-placeholder-val="{{ true }}">
+          <div style="{{ tableVars }}">
+            <div style="margin-top:12px;background:#111319;border:1px solid #1E232B;border-radius:4px;overflow:auto">
+              <table style="width:100%;min-width:900px;border-collapse:collapse;font-size:12.5px">
+                <thead>
+                  <tr>
+                    <th style="position:sticky;left:0;background:#0C0E13;text-align:left;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373;font-weight:600;padding:11px 14px;min-width:228px;border-bottom:1px solid #2D333D">Empresa</th>
+                    <th style="background:#0C0E13;text-align:left;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373;font-weight:600;padding:11px 12px;border-bottom:1px solid #2D333D">Cidade</th>
+                    <th style="background:#0C0E13;text-align:left;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373;font-weight:600;padding:11px 12px;border-bottom:1px solid #2D333D">Nicho</th>
+                    <th style="background:#0C0E13;text-align:left;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373;font-weight:600;padding:11px 12px;border-bottom:1px solid #2D333D">Segmento ICP</th>
+                    <th style="background:#0C0E13;text-align:right;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373;font-weight:600;padding:11px 12px;border-bottom:1px solid #2D333D">Score</th>
+                    <th style="background:#0C0E13;text-align:left;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373;font-weight:600;padding:11px 12px;border-bottom:1px solid #2D333D">Etapa</th>
+                    <th style="background:#0C0E13;text-align:right;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373;font-weight:600;padding:11px 12px;border-bottom:1px solid #2D333D">Proposta</th>
+                    <th style="background:#0C0E13;text-align:left;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373;font-weight:600;padding:11px 14px;border-bottom:1px solid #2D333D">Próximo contato</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <sc-for list="{{ rows }}" as="r" hint-placeholder-count="7">
+                    <tr onClick="{{ r.toggle }}" style="cursor:pointer;border-bottom:1px solid #1E232B" style-hover="background:#0C0E13">
+                      <td style="position:sticky;left:0;background:#111319;padding:var(--row-pad,11px) 14px">
+                        <div style="display:flex;align-items:center;gap:9px">
+                          <span style="{{ r.caret }}">›</span>
+                          <div style="min-width:0">
+                            <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:205px">{{ r.nome }}</div>
+                            <div style="font-size:10.5px;color:#5A6373">#{{ r.id }} · {{ r.cnpjShort }}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td style="padding:var(--row-pad,11px) 12px;color:#C3CBD8">{{ r.cidade }}</td>
+                      <td style="padding:var(--row-pad,11px) 12px;color:#C3CBD8">{{ r.nicho }}</td>
+                      <td style="padding:var(--row-pad,11px) 12px"><span style="{{ r.icpChip }}">{{ r.icp }}</span></td>
+                      <td style="padding:var(--row-pad,11px) 12px;text-align:right"><span style="{{ r.scoreStyle }}">{{ r.score }}</span></td>
+                      <td style="padding:var(--row-pad,11px) 12px;color:#C3CBD8">{{ r.status }}</td>
+                      <td style="padding:var(--row-pad,11px) 12px;text-align:right;font-family:Orbitron,sans-serif;font-size:11.5px;color:{{ r.valorColor }}">{{ r.valor }}</td>
+                      <td style="padding:var(--row-pad,11px) 14px;color:#8A94A6">{{ r.proximo }}</td>
+                    </tr>
+                    <sc-if value="{{ r.expanded }}" hint-placeholder-val="{{ false }}">
+                      <tr>
+                        <td colspan="8" style="background:#0C0E13;border-bottom:1px solid #1E232B;padding:16px 14px">
+                          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px">
+                            <sc-for list="{{ r.details }}" as="d" hint-placeholder-count="6">
+                              <div>
+                                <div style="font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373">{{ d.label }}</div>
+                                <div style="font-size:12.5px;margin-top:3px;color:#C3CBD8">{{ d.value }}</div>
+                              </div>
+                            </sc-for>
+                          </div>
+                          <div style="display:flex;gap:8px;margin-top:14px">
+                            <button style="background:rgba(37,104,255,.1);border:1px solid rgba(125,211,252,.3);color:#F5F7FA;border-radius:3px;padding:6px 11px;font-size:11.5px;cursor:pointer" style-hover="border-color:#7DD3FC">Consultar CNPJ</button>
+                            <button style="background:transparent;border:1px solid #2D333D;color:#8A94A6;border-radius:3px;padding:6px 11px;font-size:11.5px;cursor:pointer" style-hover="border-color:#7DD3FC;color:#F5F7FA">Registrar contato</button>
+                            <button onClick="{{ r.askDelete }}" style="margin-left:auto;background:transparent;border:1px solid rgba(255,107,107,.35);color:#ff8f8f;border-radius:3px;padding:6px 11px;font-size:11.5px;cursor:pointer" style-hover="background:rgba(255,107,107,.1)">Excluir</button>
+                          </div>
+                        </td>
+                      </tr>
+                    </sc-if>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ tableEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="border:1px dashed #2D333D;border-radius:4px;padding:30px;margin-top:12px">
+            <div style="font-family:Orbitron,sans-serif;font-size:13px;font-weight:600;letter-spacing:.12em;text-transform:uppercase">Nenhuma empresa com esses filtros</div>
+            <p style="font-size:12.5px;color:#8A94A6;margin:8px 0 12px">A base tem 47 registros. Limpe os filtros ou cadastre a empresa manualmente.</p>
+            <button onClick="{{ clearFilters }}" style="background:transparent;border:1px solid rgba(125,211,252,.35);color:#7DD3FC;border-radius:3px;padding:7px 12px;font-size:12px;cursor:pointer" style-hover="background:rgba(37,104,255,.14)">Limpar filtros</button>
+          </div>
+        </sc-if>
+
+        <div style="margin-top:26px;display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <section style="background:#111319;border:1px solid #1E232B;border-radius:4px;padding:16px">
+            <h4 style="margin:0;font-family:Orbitron,sans-serif;font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase">Consulta cadastral · BrasilAPI</h4>
+            <p style="font-size:11.5px;color:#8A94A6;margin:6px 0 12px">Dados públicos, sem chave. Preenche razão social, endereço e CNAE.</p>
+            <div style="display:flex;gap:9px">
+              <input placeholder="00.000.000/0001-91" style="flex:1;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none">
+              <button style="background:linear-gradient(90deg,#0D6EFD,#2568FF);border:1px solid rgba(125,211,252,.45);color:#fff;border-radius:3px;padding:9px 14px;font-size:12px;font-weight:600;cursor:pointer">Consultar</button>
+            </div>
+          </section>
+          <section style="background:#111319;border:1px solid rgba(255,107,107,.2);border-radius:4px;padding:16px">
+            <h4 style="margin:0;font-family:Orbitron,sans-serif;font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#ff8f8f">Excluir registro</h4>
+            <p style="font-size:11.5px;color:#8A94A6;margin:6px 0 12px">O seletor mostra nome, cidade e etapa — nunca só o ID.</p>
+            <div style="display:flex;gap:9px">
+              <select onChange="{{ setDelete }}" style="flex:1;min-width:0;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12px;cursor:pointer">
+                <sc-for list="{{ deleteOpts }}" as="o" hint-placeholder-count="4"><option value="{{ o.value }}">{{ o.label }}</option></sc-for>
+              </select>
+              <button onClick="{{ askDelete }}" style="background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.4);color:#ff8f8f;border-radius:3px;padding:9px 14px;font-size:12px;cursor:pointer;white-space:nowrap" style-hover="background:rgba(255,107,107,.2)">Excluir</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isAuto }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:20px 26px 48px;animation:fade .25s ease">
+        <div style="display:flex;align-items:center;gap:10px;background:rgba(37,104,255,.06);border:1px solid rgba(125,211,252,.22);border-left:2px solid #7DD3FC;border-radius:3px;padding:12px 15px;font-size:12.5px;color:#C3CBD8">
+          <span style="width:6px;height:6px;border-radius:50%;background:#7DD3FC;animation:pulse 2.2s infinite"></span>
+          Worker online — 1 campanha ativa, próxima execução às 19:17
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:11px;margin-top:16px">
+          <sc-for list="{{ campaigns }}" as="c" hint-placeholder-count="2">
+            <div style="background:#111319;border:1px solid #1E232B;border-radius:4px;padding:15px" style-hover="border-color:rgba(125,211,252,.3)">
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="font-size:13.5px;font-weight:600;flex:1;min-width:0">{{ c.nome }}</div>
+                <span style="{{ c.chip }}">{{ c.status }}</span>
+              </div>
+              <div style="font-size:11.5px;color:#8A94A6;margin-top:5px">{{ c.escopo }} · {{ c.fonte }}</div>
+              <div style="display:flex;gap:16px;margin-top:12px;padding-top:12px;border-top:1px solid #1E232B">
+                <div><div style="font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#5A6373">Limite/dia</div><div style="font-family:Orbitron,sans-serif;font-size:14px;margin-top:2px">{{ c.limite }}</div></div>
+                <div><div style="font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#5A6373">Horário</div><div style="font-family:Orbitron,sans-serif;font-size:14px;margin-top:2px">{{ c.horario }}</div></div>
+                <div><div style="font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#5A6373">Última</div><div style="font-size:12px;margin-top:4px;color:#C3CBD8">{{ c.ultima }}</div></div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="display:flex;gap:9px;margin-top:16px;align-items:flex-end;flex-wrap:wrap">
+          <label style="width:320px"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Gerenciar campanha</span>
+            <select onChange="{{ setCampaign }}" style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12px;cursor:pointer">
+              <sc-for list="{{ campaignOpts }}" as="o" hint-placeholder-count="2"><option value="{{ o.value }}">{{ o.label }}</option></sc-for>
+            </select>
+          </label>
+          <button style="background:linear-gradient(90deg,#0D6EFD,#2568FF);border:1px solid rgba(125,211,252,.45);color:#fff;border-radius:3px;padding:9px 14px;font-size:12px;font-weight:600;cursor:pointer">Executar agora</button>
+          <button style="background:transparent;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 14px;font-size:12px;cursor:pointer" style-hover="border-color:#7DD3FC">Ativar / pausar</button>
+          <button onClick="{{ askDeleteCampaign }}" style="background:transparent;border:1px solid rgba(255,107,107,.35);color:#ff8f8f;border-radius:3px;padding:9px 14px;font-size:12px;cursor:pointer" style-hover="background:rgba(255,107,107,.12)">Excluir campanha</button>
+        </div>
+
+        <h4 style="margin:28px 0 12px;font-family:Orbitron,sans-serif;font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase">Histórico de execuções</h4>
+        <div style="background:#111319;border:1px solid #1E232B;border-radius:4px;overflow:auto">
+          <table style="width:100%;min-width:700px;border-collapse:collapse;font-size:12.5px">
+            <thead>
+              <tr>
+                <th style="background:#0C0E13;text-align:left;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373;font-weight:600;padding:11px 14px;border-bottom:1px solid #2D333D">Início</th>
+                <th style="background:#0C0E13;text-align:left;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373;font-weight:600;padding:11px 12px;border-bottom:1px solid #2D333D">Campanha</th>
+                <th style="background:#0C0E13;text-align:left;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373;font-weight:600;padding:11px 12px;border-bottom:1px solid #2D333D">Status</th>
+                <th style="background:#0C0E13;text-align:right;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373;font-weight:600;padding:11px 12px;border-bottom:1px solid #2D333D">Encontrados</th>
+                <th style="background:#0C0E13;text-align:right;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373;font-weight:600;padding:11px 12px;border-bottom:1px solid #2D333D">Inseridos</th>
+                <th style="background:#0C0E13;text-align:right;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:#5A6373;font-weight:600;padding:11px 14px;border-bottom:1px solid #2D333D">Duplicados</th>
+              </tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{ runs }}" as="r" hint-placeholder-count="4">
+                <tr style="border-bottom:1px solid #1E232B" style-hover="background:#0C0E13">
+                  <td style="padding:10px 14px;color:#C3CBD8">{{ r.inicio }}</td>
+                  <td style="padding:10px 12px">{{ r.campanha }}</td>
+                  <td style="padding:10px 12px"><span style="{{ r.chip }}">{{ r.status }}</span></td>
+                  <td style="padding:10px 12px;text-align:right;font-family:Orbitron,sans-serif;font-size:11.5px">{{ r.encontrados }}</td>
+                  <td style="padding:10px 12px;text-align:right;font-family:Orbitron,sans-serif;font-size:11.5px;color:#7DD3FC">{{ r.inseridos }}</td>
+                  <td style="padding:10px 14px;text-align:right;font-family:Orbitron,sans-serif;font-size:11.5px;color:#8A94A6">{{ r.duplicados }}</td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isNova }}" hint-placeholder-val="{{ false }}">
+      <div style="padding:22px 26px 48px;max-width:920px;animation:fade .25s ease">
+        <div style="background:#111319;border:1px solid #1E232B;border-radius:4px;padding:20px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px 20px">
+            <label style="display:block"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Empresa <span style="color:#7DD3FC">*</span></span>
+              <input onInput="{{ setEmpresa }}" value="{{ empresa }}" placeholder="Nome fantasia" style="{{ empresaStyle }}">
+              <sc-if value="{{ empresaError }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:11px;color:#ff8f8f;margin-top:5px">Obrigatório para salvar o registro.</div>
+              </sc-if>
+            </label>
+            <label style="display:block"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Razão social</span><input style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none"></label>
+            <label style="display:block"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Nicho <span style="color:#7DD3FC">*</span></span>
+              <input onInput="{{ setNichoNovo }}" value="{{ nichoNovo }}" placeholder="Ex.: tecnologia" style="{{ nichoStyle }}">
+              <sc-if value="{{ nichoError }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:11px;color:#ff8f8f;margin-top:5px">Obrigatório — define a fonte de prospecção.</div>
+              </sc-if>
+            </label>
+            <label style="display:block"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">CNPJ</span><input placeholder="00.000.000/0001-91" style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none"></label>
+            <label style="display:block"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Contato / decisor</span><input style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none"></label>
+            <label style="display:block"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Cidade, UF</span><input style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none"></label>
+            <label style="display:block"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">E-mail</span><input style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none"></label>
+            <label style="display:block"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Telefone</span><input style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none"></label>
+            <label style="display:block;grid-column:1/-1"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Endereço</span><input style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none"></label>
+            <label style="display:block;grid-column:1/-1"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Observações</span><textarea style="width:100%;min-height:88px;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none;resize:vertical"></textarea></label>
+          </div>
+          <div style="display:flex;gap:9px;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid #1E232B">
+            <button onClick="{{ saveNova }}" style="background:linear-gradient(90deg,#0D6EFD,#2568FF);border:1px solid rgba(125,211,252,.45);color:#fff;border-radius:4px;padding:10px 16px;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:0 0 22px rgba(37,104,255,.25)" style-hover="filter:brightness(1.12)">Salvar empresa</button>
+            <button onClick="{{ goClientes }}" style="background:transparent;border:1px solid #2D333D;color:#F5F7FA;border-radius:4px;padding:10px 14px;font-size:12.5px;cursor:pointer" style-hover="border-color:#7DD3FC">Cancelar</button>
+            <sc-if value="{{ saved }}" hint-placeholder-val="{{ false }}">
+              <span style="font-size:11.5px;color:#7DD3FC;border:1px solid rgba(125,211,252,.3);border-radius:3px;padding:5px 10px">Cadastrada e enviada a Novos Leads</span>
+            </sc-if>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+  </main>
+
+  <sc-if value="{{ confirming }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;display:grid;place-items:center;padding:24px;background:rgba(5,6,8,.78);backdrop-filter:blur(3px);z-index:20">
+      <div style="width:min(460px,100%);background:#111319;border:1px solid rgba(255,107,107,.3);border-radius:4px;padding:22px;box-shadow:0 24px 60px rgba(0,0,0,.6);animation:fade .18s ease">
+        <div style="font-family:Orbitron,sans-serif;font-size:14px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:#ff8f8f">{{ confirmTitle }}</div>
+        <p style="font-size:12.5px;color:#C3CBD8;line-height:1.65;margin:10px 0 0">{{ confirmBody }}</p>
+        <sc-if value="{{ needsTyped }}" hint-placeholder-val="{{ false }}">
+          <label style="display:block;margin-top:14px"><span style="display:block;font-size:10.5px;color:#8A94A6;margin-bottom:6px;letter-spacing:.06em;text-transform:uppercase">Digite o nome para confirmar</span><input onInput="{{ setTyped }}" style="width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none"></label>
+        </sc-if>
+        <div style="display:flex;justify-content:flex-end;gap:9px;margin-top:18px">
+          <button onClick="{{ cancelDelete }}" style="background:transparent;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 14px;font-size:12px;cursor:pointer" style-hover="border-color:#7DD3FC">Cancelar</button>
+          <button onClick="{{ doDelete }}" disabled="{{ confirmDisabled }}" style="{{ confirmBtnStyle }}">Excluir definitivamente</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;defaultDensity&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;confortável&quot;,&quot;compacta&quot;],&quot;default&quot;:&quot;confortável&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Tabela&quot;},&quot;requireTypedConfirm&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Exclusão&quot;},&quot;circuitAccents&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Visual&quot;}}">
+const STAGES = ['Novos Leads', 'Contato / Qualificação', 'Vistoria Técnica', 'Proposta Enviada'];
+const INPUT = 'width:100%;background:#0A0A0F;border:1px solid #2D333D;color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none';
+const INPUT_ERR = 'width:100%;background:#0A0A0F;border:1px solid rgba(255,107,107,.55);color:#F5F7FA;border-radius:3px;padding:9px 11px;font-size:12.5px;outline:none';
+
+const BASE = [
+  { id: 3, nome: 'Ecta Tecnologia', cidade: 'São Paulo, SP', nicho: 'tecnologia', icp: 'Não classificado', score: 100, stage: 0, valor: 0, proximo: null, cnpj: null, razao: null, decisor: null, endereco: 'R. Voluntários da Pátria, 45', servicos: 'Infra · Suporte gerenciado', site: 'ecta.com.br', tel: null },
+  { id: 4, nome: 'IDEA Tecnologia', cidade: 'São Paulo, SP', nicho: 'tecnologia', icp: 'Não classificado', score: 100, stage: 1, valor: 18500, proximo: '25/08 · call', cnpj: '12.345.678/0001-90', razao: 'IDEA Sistemas Ltda', decisor: 'Marina Alencar', endereco: 'Av. Paulista, 302 - cj. 10', servicos: 'Cabeamento · CFTV', site: 'idea.com.br', tel: '(11) 3555-2020' },
+  { id: 6, nome: 'Green Tecnologia', cidade: 'São Paulo, SP', nicho: 'tecnologia', icp: 'Galpões Logísticos & Indústrias', score: 92, stage: 2, valor: 46000, proximo: '22/08 · vistoria', cnpj: '09.887.221/0001-44', razao: 'Green TI Serviços SA', decisor: 'Paulo Ferraz', endereco: 'Av. Paulista, 326 - 16º andar', servicos: 'Vistoria técnica · Rede', site: 'green.com.br', tel: '(11) 3777-1010' },
+  { id: 8, nome: 'Penso Tecnologia', cidade: 'São Paulo, SP', nicho: 'tecnologia', icp: 'Não classificado', score: 74, stage: 0, valor: 0, proximo: null, cnpj: null, razao: null, decisor: null, endereco: 'Alameda Campinas, 977', servicos: 'Suporte gerenciado', site: null, tel: '(11) 2222-8080' },
+  { id: 9, nome: 'Empresa de Tecnologia da Informação', cidade: 'São Paulo, SP', nicho: 'tecnologia', icp: 'Clínicas, Hospitais & Laboratórios', score: 88, stage: 3, valor: 132000, proximo: '21/08 · follow-up', cnpj: '43.112.909/0001-12', razao: 'ETI Informática Ltda', decisor: 'Ricardo Sarmento', endereco: 'R. Líbero Badaró, 425 - 9º', servicos: 'Data center · Nobreak', site: 'eti.com.br', tel: '(11) 3030-4545' },
+  { id: 11, nome: 'São Paulo Tech School', cidade: 'São Paulo, SP', nicho: 'educação', icp: 'Não classificado', score: 61, stage: 0, valor: 0, proximo: null, cnpj: null, razao: null, decisor: null, endereco: 'Rua Haddock Lobo, 595', servicos: 'Wi-Fi corporativo', site: 'sptech.school', tel: null },
+  { id: 12, nome: 'Cardoso Tecnologia', cidade: 'Campinas, SP', nicho: 'tecnologia', icp: 'Não classificado', score: 70, stage: 1, valor: 9800, proximo: '27/08 · proposta', cnpj: null, razao: null, decisor: 'Ana Cardoso', endereco: 'Av. Paulista, 1106 - sala 4', servicos: 'Suporte gerenciado', site: null, tel: '(19) 3232-1177' },
+  { id: 13, nome: 'ITM Tecnologia', cidade: 'Santo André, SP', nicho: 'tecnologia', icp: 'Não classificado', score: 55, stage: 0, valor: 0, proximo: null, cnpj: null, razao: null, decisor: null, endereco: 'R. da Consolação, 247', servicos: 'Cabeamento', site: null, tel: null }
+];
+
+const brl = (n) => 'R$ ' + n.toLocaleString('pt-BR');
+const chip = (color, border, bg) => 'font-size:10px;letter-spacing:.06em;padding:2px 8px;border-radius:3px;white-space:nowrap;color:' + color + ';border:1px solid ' + border + ';background:' + bg;
+const scoreStyle = (n) => 'font-family:Orbitron,sans-serif;font-size:11px;padding:2px 8px;border-radius:3px;flex:none;' + (n >= 85
+  ? 'color:#7DD3FC;border:1px solid rgba(125,211,252,.35);background:rgba(37,104,255,.12)'
+  : n >= 70 ? 'color:#C3CBD8;border:1px solid #2D333D;background:#0A0A0F'
+  : 'color:#8A94A6;border:1px solid #2D333D;background:#0A0A0F');
+
+class Component extends DCLogic {
+  state = {
+    screen: 'dashboard', rowsData: BASE.map((c) => ({ ...c })), expanded: null,
+    query: '', nicho: 'Todos', status: 'Todas', dense: false, loading: false,
+    prosp: 'idle', deleteId: 3, campaignId: 1, confirmKind: null, typed: '',
+    empresa: '', nichoNovo: '', touched: false, saved: false
+  };
+
+  componentDidMount() {
+    if (this.props.defaultDensity === 'compacta') this.setState({ dense: true });
+  }
+
+  go = (screen) => () => this.setState({ screen, saved: false, expanded: null });
+
+  filtered() {
+    const q = this.state.query.trim().toLowerCase();
+    return this.state.rowsData.filter((c) => {
+      if (q && !(c.nome + ' ' + c.cidade + ' ' + (c.cnpj || '')).toLowerCase().includes(q)) return false;
+      if (this.state.nicho !== 'Todos' && c.nicho !== this.state.nicho) return false;
+      if (this.state.status !== 'Todas' && STAGES[c.stage] !== this.state.status) return false;
+      return true;
+    });
+  }
+
+  renderVals() {
+    const s = this.state;
+    const typedConfirm = this.props.requireTypedConfirm ?? true;
+    const glow = this.props.circuitAccents ?? true;
+    const screens = [
+      ['dashboard', 'Dashboard', '◱', 'Operacional', 'Prospecção, pipeline e operação comercial em um só lugar.', null],
+      ['pipeline', 'Pipeline', '▤', '4 etapas', 'Negócios abertos e valor em proposta por etapa.', 8],
+      ['prospeccao', 'Prospecção', '⌖', 'Bacen · CVM · B3', 'Captura em fontes públicas com scoring de ICP.', null],
+      ['clientes', 'Clientes', '▦', '47 registros', 'Base cadastral, consulta CNPJ e exclusão segura.', 47],
+      ['automacao', 'Automação', '⚡', 'Worker ativo', 'Campanhas agendadas, motor contínuo e histórico.', 1],
+      ['nova', 'Nova empresa', '＋', 'Cadastro manual', 'Campos obrigatórios validados antes de salvar.', null]
+    ];
+    const navLabels = { dashboard: 'Dashboard', pipeline: 'Negócios / Pipeline', prospeccao: 'Leads / Prospecção', clientes: 'Clientes / Empresas', automacao: 'Automação', nova: 'Nova empresa' };
+    const cur = screens.find((x) => x[0] === s.screen) || screens[0];
+    const filtered = this.filtered();
+    const byStage = STAGES.map((n, i) => s.rowsData.filter((c) => c.stage === i));
+    const max = Math.max(1, ...byStage.map((g) => g.length));
+    const target = s.confirmKind === 'lead' ? s.rowsData.find((c) => c.id === Number(s.deleteId)) : null;
+
+    const icpAgg = {};
+    s.rowsData.forEach((c) => {
+      icpAgg[c.icp] = icpAgg[c.icp] || { name: c.icp, leads: 0, sum: 0 };
+      icpAgg[c.icp].leads += 1;
+      icpAgg[c.icp].sum += c.score;
+    });
+
+    const segBtn = (on) => 'border:0;border-radius:2px;padding:6px 11px;font-size:11.5px;cursor:pointer;' + (on
+      ? 'background:rgba(37,104,255,.18);color:#7DD3FC'
+      : 'background:transparent;color:#8A94A6');
+
+    return {
+      nav: screens.map((x) => ({
+        icon: x[2],
+        label: navLabels[x[0]],
+        count: x[5],
+        go: this.go(x[0]),
+        style: 'display:flex;align-items:center;gap:10px;width:100%;background:' + (x[0] === s.screen ? 'rgba(37,104,255,.12)' : 'transparent')
+          + ';border:0;border-left:2px solid ' + (x[0] === s.screen ? '#7DD3FC' : 'transparent')
+          + ';padding:9px 10px;font-size:12.5px;font-weight:' + (x[0] === s.screen ? '600' : '400')
+          + ';color:' + (x[0] === s.screen ? '#F5F7FA' : '#8A94A6') + ';cursor:pointer;border-radius:0 3px 3px 0'
+      })),
+      title: cur[1], badge: cur[3], subtitle: cur[4],
+      isDash: s.screen === 'dashboard', isPipeline: s.screen === 'pipeline', isProsp: s.screen === 'prospeccao',
+      isClientes: s.screen === 'clientes', isAuto: s.screen === 'automacao', isNova: s.screen === 'nova',
+      goNova: this.go('nova'), goClientes: this.go('clientes'), goProsp: this.go('prospeccao'),
+
+      kpis: [
+        { label: 'Leads na base', value: '47', note: '+47 este mês', color: '#7DD3FC' },
+        { label: 'Novos leads', value: String(byStage[0].length + 39), note: 'sem primeiro contato', color: '#8A94A6' },
+        { label: 'Em qualificação', value: String(byStage[1].length), note: '2 aguardando retorno', color: '#8A94A6' },
+        { label: 'Propostas', value: String(byStage[3].length), note: brl(132000) + ' em jogo', color: '#7DD3FC' },
+        { label: 'Conversão', value: '2,1%', note: 'meta 6%', color: '#ff8f8f' },
+        { label: 'Valor bruto', value: 'R$ 206k', note: 'ciclo médio 34 dias', color: '#8A94A6' }
+      ],
+      stageBars: STAGES.map((name, i) => ({
+        name, count: byStage[i].length,
+        value: brl(byStage[i].reduce((a, c) => a + c.valor, 0)),
+        barStyle: 'height:6px;border-radius:999px;width:' + Math.round((byStage[i].length / max) * 100) + '%;background:'
+          + (glow ? 'linear-gradient(90deg,#0D6EFD,#7DD3FC)' : '#2568FF')
+          + (glow ? ';box-shadow:0 0 10px rgba(37,104,255,.5)' : '')
+      })),
+      icpRows: Object.values(icpAgg).map((r) => ({
+        name: r.name, leads: r.leads,
+        score: 'score ' + Math.round(r.sum / r.leads),
+        chip: chip('#7DD3FC', 'rgba(125,211,252,.28)', 'rgba(37,104,255,.1)')
+      })),
+      tasks: [
+        { kind: 'Proposta vencendo', title: 'Empresa de Tecnologia da Informação', note: 'R$ 132.000 enviados há 9 dias — sem retorno.', color: '#ff8f8f' },
+        { kind: 'Vistoria hoje', title: 'Green Tecnologia', note: 'Diagnóstico técnico às 14h, Av. Paulista 326.', color: '#7DD3FC' },
+        { kind: 'Sem contato', title: '39 leads em Novos Leads', note: 'Nenhuma tentativa registrada desde a captura.', color: '#8A94A6' }
+      ],
+
+      stages: STAGES.map((name, i) => ({
+        name, count: byStage[i].length,
+        value: brl(byStage[i].reduce((a, c) => a + c.valor, 0)) + ' em proposta',
+        empty: byStage[i].length === 0,
+        dot: 'width:6px;height:6px;flex:none;border-radius:50%;background:' + (i === 0 ? '#5A6373' : i === 3 ? '#7DD3FC' : '#2568FF'),
+        cards: byStage[i].map((c) => ({
+          nome: c.nome, cidade: c.cidade, nicho: c.nicho, icp: c.icp,
+          score: c.score,
+          scoreStyle: scoreStyle(c.score),
+          icpChip: c.icp === 'Não classificado'
+            ? chip('#8A94A6', '#2D333D', 'transparent')
+            : chip('#7DD3FC', 'rgba(125,211,252,.28)', 'rgba(37,104,255,.1)'),
+          valor: c.valor ? brl(c.valor) : null,
+          stageOpts: STAGES.map((n, j) => ({ value: String(j), label: n, selected: j === c.stage })),
+          move: (e) => {
+            const v = Number(e.target.value);
+            this.setState((st) => ({ rowsData: st.rowsData.map((r) => (r.id === c.id ? { ...r, stage: v } : r)) }));
+          },
+          open: () => this.setState({ screen: 'clientes', expanded: c.id, query: c.nome })
+        }))
+      })),
+
+      sourceChips: [
+        { label: 'Google Places · conectado', style: chip('#7DD3FC', 'rgba(125,211,252,.28)', 'rgba(37,104,255,.1)') },
+        { label: 'Bacen · público', style: chip('#8A94A6', '#2D333D', 'transparent') },
+        { label: 'CVM · público', style: chip('#8A94A6', '#2D333D', 'transparent') },
+        { label: 'B3 · público', style: chip('#8A94A6', '#2D333D', 'transparent') },
+        { label: 'OpenStreetMap · fallback', style: chip('#8A94A6', '#2D333D', 'transparent') }
+      ],
+      runProspect: () => { this.setState({ prosp: 'loading' }); setTimeout(() => this.setState({ prosp: 'done' }), 1400); },
+      prospIdle: s.prosp === 'idle', prospLoading: s.prosp === 'loading', prospDone: s.prosp === 'done',
+      skeletons: [1, 2, 3, 4, 5, 6, 7],
+      prospResults: [
+        { nome: 'Nexo Datacenter', cidade: 'Campinas, SP', fonte: 'Google Places', score: 94 },
+        { nome: 'Vetor Redes', cidade: 'Campinas, SP', fonte: 'Google Places', score: 88 },
+        { nome: 'Cooperativa Credi Vale', cidade: 'Valinhos, SP', fonte: 'Bacen', score: 85 },
+        { nome: 'Lab Diagnóstico Central', cidade: 'Campinas, SP', fonte: 'OpenStreetMap', score: 78 },
+        { nome: 'Galpão Sul Logística', cidade: 'Hortolândia, SP', fonte: 'OpenStreetMap', score: 72 },
+        { nome: 'TechMed Equipamentos', cidade: 'Campinas, SP', fonte: 'Google Places', score: 71 },
+        { nome: 'Oficina Digital ME', cidade: 'Sumaré, SP', fonte: 'OpenStreetMap', score: 48 },
+        { nome: 'Padaria Bonfim', cidade: 'Campinas, SP', fonte: 'OpenStreetMap', score: 22 }
+      ].map((r) => ({ ...r, scoreStyle: scoreStyle(r.score) })),
+
+      query: s.query,
+      nichoOpts: ['Todos', 'tecnologia', 'educação'],
+      statusOpts: ['Todas'].concat(STAGES),
+      setQuery: (e) => this.setState({ query: e.target.value, screen: 'clientes' }),
+      setNicho: (e) => this.setState({ nicho: e.target.value }),
+      setStatus: (e) => this.setState({ status: e.target.value }),
+      cozyStyle: segBtn(!s.dense), tightStyle: segBtn(s.dense),
+      setCozy: () => this.setState({ dense: false }),
+      setTight: () => this.setState({ dense: true }),
+      tableVars: '--row-pad:' + (s.dense ? '5px' : '11px'),
+      reload: () => { this.setState({ loading: true }); setTimeout(() => this.setState({ loading: false }), 1100); },
+      tableLoading: s.loading,
+      tableReady: !s.loading && filtered.length > 0,
+      tableEmpty: !s.loading && filtered.length === 0,
+      resultLabel: filtered.length + ' de ' + s.rowsData.length + ' empresas',
+      clearFilters: () => this.setState({ query: '', nicho: 'Todos', status: 'Todas' }),
+      rows: filtered.map((c) => ({
+        id: c.id, nome: c.nome, cidade: c.cidade, nicho: c.nicho, icp: c.icp, score: c.score,
+        icpChip: c.icp === 'Não classificado' ? chip('#8A94A6', '#2D333D', 'transparent') : chip('#7DD3FC', 'rgba(125,211,252,.28)', 'rgba(37,104,255,.1)'),
+        scoreStyle: scoreStyle(c.score),
+        status: STAGES[c.stage],
+        valor: c.valor ? brl(c.valor) : '—',
+        valorColor: c.valor ? '#7DD3FC' : '#5A6373',
+        proximo: c.proximo || 'sem agenda',
+        cnpjShort: c.cnpj || 'CNPJ pendente',
+        expanded: s.expanded === c.id,
+        caret: 'font-size:13px;color:#5A6373;transition:transform .15s;display:inline-block;transform:rotate(' + (s.expanded === c.id ? '90deg' : '0deg') + ')',
+        toggle: () => this.setState({ expanded: s.expanded === c.id ? null : c.id }),
+        askDelete: (e) => { e.stopPropagation(); this.setState({ deleteId: c.id, confirmKind: 'lead', typed: '' }); },
+        details: [
+          { label: 'Razão social', value: c.razao || 'não informada' },
+          { label: 'CNPJ', value: c.cnpj || 'pendente de consulta' },
+          { label: 'Decisor', value: c.decisor || 'não mapeado' },
+          { label: 'Endereço', value: c.endereco },
+          { label: 'Contato', value: [c.tel, c.site].filter(Boolean).join(' · ') || 'sem contato' },
+          { label: 'Serviços recomendados', value: c.servicos }
+        ]
+      })),
+      deleteOpts: s.rowsData.map((c) => ({ value: String(c.id), label: c.nome + ' — #' + c.id + ' · ' + c.cidade + ' · ' + STAGES[c.stage] })),
+      setDelete: (e) => this.setState({ deleteId: Number(e.target.value) }),
+      askDelete: () => this.setState({ confirmKind: 'lead', typed: '' }),
+
+      campaigns: [
+        { nome: 'caçando cliente', escopo: 'todos · são paulo, sp', fonte: 'Automático por nicho', limite: 8, horario: '19:17', ultima: '21/08 22:16', status: 'Ativa', chip: chip('#7DD3FC', 'rgba(125,211,252,.3)', 'rgba(37,104,255,.12)') },
+        { nome: 'clínicas SP', escopo: 'saúde · são paulo, sp', fonte: 'Google Places', limite: 12, horario: '07:30', ultima: '20/08 07:31', status: 'Pausada', chip: chip('#8A94A6', '#2D333D', 'transparent') }
+      ],
+      campaignOpts: [
+        { value: '1', label: '#1 — caçando cliente · todos · são paulo, sp' },
+        { value: '2', label: '#2 — clínicas SP · saúde · são paulo, sp' }
+      ],
+      setCampaign: (e) => this.setState({ campaignId: Number(e.target.value) }),
+      askDeleteCampaign: () => this.setState({ confirmKind: 'campanha', typed: '' }),
+      runs: [
+        { inicio: '21/08 22:16', campanha: 'caçando cliente', status: 'Concluída', encontrados: 12, inseridos: 8, duplicados: 4, chip: chip('#7DD3FC', 'rgba(125,211,252,.3)', 'rgba(37,104,255,.12)') },
+        { inicio: '20/08 19:17', campanha: 'caçando cliente', status: 'Concluída', encontrados: 15, inseridos: 11, duplicados: 4, chip: chip('#7DD3FC', 'rgba(125,211,252,.3)', 'rgba(37,104,255,.12)') },
+        { inicio: '19/08 19:17', campanha: 'caçando cliente', status: 'Sem resultados', encontrados: 0, inseridos: 0, duplicados: 0, chip: chip('#8A94A6', '#2D333D', 'transparent') },
+        { inicio: '18/08 07:30', campanha: 'clínicas SP', status: 'Erro de chave', encontrados: 0, inseridos: 0, duplicados: 0, chip: chip('#ff8f8f', 'rgba(255,107,107,.35)', 'rgba(255,107,107,.08)') }
+      ],
+
+      empresa: s.empresa, nichoNovo: s.nichoNovo,
+      setEmpresa: (e) => this.setState({ empresa: e.target.value }),
+      setNichoNovo: (e) => this.setState({ nichoNovo: e.target.value }),
+      empresaError: s.touched && !s.empresa.trim(),
+      nichoError: s.touched && !s.nichoNovo.trim(),
+      empresaStyle: s.touched && !s.empresa.trim() ? INPUT_ERR : INPUT,
+      nichoStyle: s.touched && !s.nichoNovo.trim() ? INPUT_ERR : INPUT,
+      saved: s.saved,
+      saveNova: () => {
+        if (!s.empresa.trim() || !s.nichoNovo.trim()) { this.setState({ touched: true }); return; }
+        const id = Math.max(...s.rowsData.map((c) => c.id)) + 1;
+        this.setState((st) => ({
+          rowsData: st.rowsData.concat([{ id, nome: st.empresa, cidade: '—', nicho: st.nichoNovo, icp: 'Não classificado', score: 50, stage: 0, valor: 0, proximo: null, cnpj: null, razao: null, decisor: null, endereco: '—', servicos: '—', site: null, tel: null }]),
+          saved: true, touched: false, empresa: '', nichoNovo: ''
+        }));
+      },
+
+      confirming: !!s.confirmKind,
+      needsTyped: typedConfirm,
+      confirmTitle: s.confirmKind === 'campanha' ? 'Excluir campanha?' : 'Excluir empresa?',
+      confirmBody: s.confirmKind === 'campanha'
+        ? 'A campanha “caçando cliente” e seu histórico de execuções serão removidos. Os leads já capturados permanecem na base.'
+        : target
+          ? 'Você vai excluir ' + target.nome + ' (#' + target.id + ' · ' + target.cidade + '), hoje em ' + STAGES[target.stage] + '. Esta ação não pode ser desfeita.'
+          : 'Selecione uma empresa.',
+      confirmDisabled: typedConfirm && s.typed.trim().toLowerCase() !== (s.confirmKind === 'campanha' ? 'caçando cliente' : (target ? target.nome.toLowerCase() : '\u0000')),
+      confirmBtnStyle: 'border:1px solid rgba(255,107,107,.5);border-radius:3px;padding:9px 14px;font-size:12px;font-weight:600;background:rgba(255,107,107,.16);color:#ffb3b3;'
+        + (typedConfirm && s.typed.trim().toLowerCase() !== (s.confirmKind === 'campanha' ? 'caçando cliente' : (target ? target.nome.toLowerCase() : '\u0000'))
+          ? 'opacity:.45;cursor:not-allowed' : 'cursor:pointer'),
+      setTyped: (e) => this.setState({ typed: e.target.value }),
+      cancelDelete: () => this.setState({ confirmKind: null, typed: '' }),
+      doDelete: () => {
+        if (s.confirmKind === 'lead' && target) this.setState((st) => ({ rowsData: st.rowsData.filter((c) => c.id !== target.id) }));
+        this.setState({ confirmKind: null, typed: '', expanded: null });
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

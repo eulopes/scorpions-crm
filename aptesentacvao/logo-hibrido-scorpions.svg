@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-labelledby="title desc">
+  <title id="title">SCORPIONS hybrid scorpion S mark</title>
+  <desc id="desc">Abstract geometric scorpion whose central circuit body forms an S.</desc>
+  <defs>
+    <linearGradient id="hybrid-blue" x1="70" y1="42" x2="250" y2="278" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f5f7fa"/>
+      <stop offset=".52" stop-color="#70d3fc"/>
+      <stop offset="1" stop-color="#2568ff"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke="url(#hybrid-blue)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- segmented tail -->
+    <path d="M159 122c-35-24-48-55-31-78 15-21 49-19 59 2 7 16-3 33-18 40"/>
+    <path d="M169 86c17-9 28-27 20-43-9-18-36-20-50-7"/>
+    <path d="M137 78l-17-15 15-20 22 10M157 43l10-22 24 7 1 22M192 49l19 12-8 23-24-5"/>
+    <path d="M184 20l13-11M209 61l19-6M221 55l12-12"/>
+    <!-- central S / shield body -->
+    <path d="M112 132l48-22 48 22-10 91-38 39-38-39z"/>
+    <path d="M188 143h-48c-14 0-22 7-22 17s8 15 22 18l29 7c14 3 22 8 22 19s-8 17-22 17h-45"/>
+    <path d="M112 132l48-22 48 22M160 110v-20M160 262v20"/>
+    <!-- left claw and circuit traces -->
+    <path d="M112 151 78 130 50 143l30 27 34-7M80 170l-30 28 7 39 27-30 27-5"/>
+    <path d="M96 143 66 119H43M91 166l-37 2H32M86 207l-30 23H35"/>
+    <!-- right claw and circuit traces -->
+    <path d="M208 151l34-21 28 13-30 27-34-7M240 170l30 28-7 39-27-30-27-5"/>
+    <path d="M224 143l30-24h23M229 166l37 2h22M234 207l30 23h21"/>
+    <!-- legs -->
+    <path d="M118 188l-35 8M202 188l35 8M119 207l-28 20M201 207l28 20"/>
+  </g>
+  <g fill="#70d3fc">
+    <circle cx="159" cy="20" r="4"/><circle cx="197" cy="9" r="4"/><circle cx="233" cy="43" r="4"/>
+    <circle cx="43" cy="119" r="4"/><circle cx="32" cy="168" r="4"/><circle cx="35" cy="230" r="4"/>
+    <circle cx="277" cy="119" r="4"/><circle cx="288" cy="168" r="4"/><circle cx="285" cy="230" r="4"/>
+    <circle cx="160" cy="90" r="4"/><circle cx="160" cy="282" r="4"/>
+  </g>
+  <path d="M149 173h22l-9 10h18" fill="none" stroke="#006efd" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="145" y="154" fill="#70d3fc" font-family="monospace" font-size="11">&lt;/&gt;</text>
+</svg>

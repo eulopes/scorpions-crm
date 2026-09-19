@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/frontend-design/SKILL.md",
+      "computedHash": "106acf230014cbb43ca34e6410371321b56ca742f9ee0442e8ec05bf02eb0384"
+    },
+    "security-scan": {
+      "source": "Ray0907/security-scan",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "a3276bfaa591076218d028a3452377d55711e448e6fd7d30b1e297798299f89c"
+    },
+    "semgrep": {
+      "source": "semgrep/skills",
+      "sourceType": "github",
+      "skillPath": "skills/semgrep/SKILL.md",
+      "computedHash": "fb16e4b9a879b326e35394fbb31cc528b2812aad8821b412b5f5fd8a67e40d69"
+    }
+  }
+}

@@ -16,6 +16,8 @@ __pycache__/
 # Banco de dados e backups locais (dados reais de clientes/leads)
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 scorpions_base_legacy_backup.db
 
 # Dump da Receita (Fase 1) -- DuckDB e cache dos ~15 GB mensais

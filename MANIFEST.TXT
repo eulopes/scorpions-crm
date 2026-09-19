@@ -1,0 +1,5 @@
+alvaras/alvaras.zip (application/zipped-shapefile) 1697789 bytes.
+Metadados - Alvaras.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet) 12048 bytes.
+alvaras.parquet (application/octet-stream) 1302838 bytes.
+alvaras.gpkg (application/octet-stream) 4165632 bytes.
+alvaras.geojson (application/geo+json) 14430848 bytes.
